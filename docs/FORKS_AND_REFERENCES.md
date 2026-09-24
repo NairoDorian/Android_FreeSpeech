@@ -159,7 +159,29 @@ Beyond the FUTO Binder bridge, `djurcola` introduces three key features:
 
 ---
 
-## 4. Local Clones Layout
+## 4. FUTO Keyboard Counterpart Fork: djurcola/android-keyboard
+
+- **Repository**: [https://github.com/djurcola/android-keyboard](https://github.com/djurcola/android-keyboard/tree/custom/gif-and-swipe)
+- **Comparison with upstream FUTO**: [Compare `futo-org:master` vs `djurcola:custom/gif-and-swipe`](https://github.com/futo-org/android-keyboard/compare/master...djurcola:android-keyboard:custom/gif-and-swipe)
+- **Local clone**: `reference_repos/android-keyboard` (branch `custom/gif-and-swipe`)
+- **Direct Connection to Android FreeSpeech / Offline Voice Input**:
+  - This is the **exact counterpart repository** to `djurcola/android_transcribe_app`. It implements the client-side voice backend switching and integration within FUTO Keyboard itself.
+  - **External Voice Backend Whitelist**: In commit `1525717f2`, `VoiceInputMenu` adds a dropdown picker (`SYSTEM_VOICE_INPUT_PACKAGE`) that allows users to route voice typing directly to external offline speech recognition providers instead of FUTO's proprietary internal Whisper models.
+  - **Explicit FreeSpeech Support**: The privacy whitelist specifically includes:
+    ```kotlin
+    val privacyWhitelist = listOf(
+        "org.futo.voiceinput",
+        "org.futo.voiceinput.dev",
+        "dev.notune.transcribe",      // Android FreeSpeech / Offline Voice Input
+        "dev.soupslurpr.transcribro"
+    )
+    ```
+  - **Shared CI Test Keystore Signing**: Integrates PR #4 (`djurcola/agent/stable-test-signing`, commit `bff1a0ccf`), sharing the same signing keystore and release pipeline as `djurcola/android_transcribe_app:agent/stable-test-signing` so test APKs of both FUTO Keyboard and FreeSpeech can be installed concurrently and interact with matching signatures.
+  - **Additional Enhancements in `custom/gif-and-swipe`**: Word recapitalization at cursor (via Shift swipe gestures), dictionary suggestion additions, long-press Russian 'ie' support, and optimized GIF & swipe animations.
+
+---
+
+## 5. Local Clones Layout
 
 All reference repositories have been cloned locally for direct inspection, diffing, and code extraction:
 
@@ -176,7 +198,8 @@ Android_FreeSpeech/
 │   ├── arthow4n/
 │   └── space-shell/
 ├── reference_repos/
-│   └── ShizuCallRecorder/
+│   ├── ShizuCallRecorder/
+│   └── android-keyboard/
 └── docs/
     ├── FORKS_AND_REFERENCES.md
     ├── UPSTREAM_PRS_REFERENCE.md
@@ -186,3 +209,4 @@ Android_FreeSpeech/
 ```
 
 *(Note: `other_forks/` and `reference_repos/` are ignored in `.gitignore` so they remain on disk for developer reference without bloating the main Git repository).*
+
