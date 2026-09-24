@@ -1,19 +1,19 @@
-# Comprehensive Migration Plan: Upgrading to NairoDorian/transcribe.cpp (v0.2.3)
+# Comprehensive Migration Plan: Tracking the Latest NairoDorian/transcribe.cpp
 
 ---
 
 ## Executive Summary
 
-The objective of this migration is to transition **Android FreeSpeech** from the outdated, monolithic `cjpais/transcribe.cpp` (v0.1.3) to the modern, modular, and high-performance **[NairoDorian/transcribe.cpp](https://github.com/NairoDorian/transcribe.cpp)** (v0.2.3, available locally at `C:\Users\Z\Downloads\PROJECTS\Unified_Audio.cpp\transcribe.cpp`).
+The objective of this migration is to transition **Android FreeSpeech** from the outdated, monolithic `cjpais/transcribe.cpp` (v0.1.3) to track the **latest version and active development branch** of **[NairoDorian/transcribe.cpp](https://github.com/NairoDorian/transcribe.cpp)** (tracking `main`, available locally at `C:\Users\Z\Downloads\PROJECTS\Unified_Audio.cpp\transcribe.cpp`).
 
-This upgrade provides the essential foundation required for **Confucius4-R2T2** streaming, eliminates global mutex deadlocks, shrinks binary footprint via modular compilation, and hardens the Android JNI interface against crashes and cold restarts.
+Rather than freezing to an intermediate point, Android FreeSpeech is architected to continuously consume the **latest releases and upstream commits** of `NairoDorian/transcribe.cpp`. This ensures immediate access to the newest model families (including **Confucius4-R2T2**), ongoing GGML kernel speedups, continuous memory optimizations, and enhanced audio pipelines.
 
 ---
 
-## 1. Architectural Evolution: 0.1.3 vs. 0.2.3
+## 1. Architectural Evolution: Legacy (0.1.3) vs. Latest NairoDorian/transcribe.cpp
 
 ```
-LEGACY ARCHITECTURE (0.1.3)
+LEGACY ARCHITECTURE (0.1.3 - cjpais)
 ┌─────────────────────────────────────────────────────────────┐
 │ Global Singleton Mutex: Arc<Mutex<Session>>                 │
 │ ❌ Single Session per model: One-shot runs & streams race   │
@@ -22,7 +22,7 @@ LEGACY ARCHITECTURE (0.1.3)
 │ ❌ No native VAD, no R2T2 streaming extension              │
 └─────────────────────────────────────────────────────────────┘
 
-MODERN ARCHITECTURE (0.2.3 - NairoDorian Fork)
+MODERN ARCHITECTURE (Latest NairoDorian/transcribe.cpp:main)
 ┌─────────────────────────────────────────────────────────────┐
 │ transcribe_cpp::Model (Arc-backed weight storage, Send+Sync)│
 │                      │                                      │
@@ -42,7 +42,7 @@ MODERN ARCHITECTURE (0.2.3 - NairoDorian Fork)
 
 ### Detailed Feature Comparison
 
-| Capability | Legacy `cjpais/transcribe.cpp` (0.1.3) | `NairoDorian/transcribe.cpp` (0.2.3) |
+| Capability | Legacy `cjpais/transcribe.cpp` (0.1.3) | Latest `NairoDorian/transcribe.cpp` (main / rolling) |
 |---|---|---|
 | **Model Separation** | `Model` and `Session` conflated in one handle | Clean separation: `Model` is `Send + Sync` (weights mmapped); `Session` is `Send` (per-thread compute context) |
 | **Streaming Mechanics** | Monolithic lock; caller must block while recording | Per-run `Session` + `Stream` handle with lock-free channel feeding (`crossbeam-channel`) |
@@ -406,7 +406,7 @@ The streaming session handles live audio capture, chunk queueing, consumer decod
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │ Phase 1: Dependency & Build Pipeline Update                  │
-│ • Update Cargo.toml to NairoDorian/transcribe.cpp v0.2.3     │
+│ • Update Cargo.toml to latest NairoDorian/transcribe.cpp:main │
 │ • Add TRANSCRIBE_MODEL_SET=minimal-multilingual to CMake args│
 │ • Verify cargo-ndk compilation on arm64-v8a                  │
 └──────────────────────────────┬───────────────────────────────┘
