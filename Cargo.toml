@@ -11,7 +11,7 @@ cpal = "0.15"
 log = "0.4"
 android_logger = "0.13"
 anyhow = "1.0"
-transcribe-cpp = "0.1.3"
+transcribe-cpp = { git = "https://github.com/NairoDorian/transcribe.cpp", branch = "main", default-features = false, features = ["minimal-multilingual"] }
 jni = "0.21"
 libc = "0.2"
 once_cell = "1.19"

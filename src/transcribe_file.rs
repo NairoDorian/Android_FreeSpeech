@@ -89,9 +89,8 @@ pub unsafe extern "system" fn Java_dev_notune_transcribe_TranscribeFileActivity_
         None => return,
     };
 
-    let len = length as usize;
-    if len == 0 {
-        log::warn!("transcribeAudio called with empty buffer");
+    if length <= 0 {
+        log::warn!("transcribeAudio called with invalid length: {}", length);
         let jvm = state.jvm.clone();
         let target_ref = state.target_ref.clone();
         drop(guard);
@@ -104,6 +103,7 @@ pub unsafe extern "system" fn Java_dev_notune_transcribe_TranscribeFileActivity_
         }
         return;
     }
+    let len = length as usize;
 
     let mut buffer = vec![0.0f32; len];
     if env

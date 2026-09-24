@@ -29,6 +29,9 @@ const MODEL_TRANSLATE_FILE: &str = "model_translate";
 /// Optional file in filesDir with the CPU thread count for inference.
 /// Absent/invalid/0 = default (all cores).
 const MODEL_THREADS_FILE: &str = "model_threads";
+/// Optional file in filesDir with the R2T2 native streaming chunk cadence in ms [80, 2000].
+/// Absent/invalid/0 = default 320 ms.
+const MODEL_R2T2_CADENCE_FILE: &str = "model_r2t2_cadence";
 
 /// Longest audio passed to the model in one run (60 s). Offline conformer
 /// models use full self-attention, whose cost grows quadratically with input
@@ -41,15 +44,19 @@ const SPLIT_SEARCH_SAMPLES: usize = 10 * 16_000;
 
 /// A loaded transcribe.cpp session plus the options applied to every run.
 pub struct Engine {
-    session: transcribe_cpp::Session,
-    language: Option<String>,
-    task: transcribe_cpp::Task,
+    pub model: transcribe_cpp::Model,
+    pub session: transcribe_cpp::Session,
+    pub session_options: transcribe_cpp::SessionOptions,
+    pub language: Option<String>,
+    pub task: transcribe_cpp::Task,
     /// Family-specific decode options attached to every run; `None` for
     /// models that don't take the whisper run extension.
-    run_ext: Option<transcribe_cpp::RunExtension>,
+    pub run_ext: Option<transcribe_cpp::RunExtension>,
     /// Status reported once loading succeeded; carries a warning when the
     /// translate setting can't do what the user expects with this model.
-    ready_status: &'static str,
+    pub ready_status: &'static str,
+    /// Native streaming cadence in ms for Confucius4-R2T2 (default 320 ms, [80, 2000]).
+    pub r2t2_cadence_ms: u32,
 }
 
 impl Engine {
@@ -58,6 +65,7 @@ impl Engine {
         language: Option<String>,
         translate: bool,
         threads: i32,
+        r2t2_cadence_ms: u32,
     ) -> Result<Engine, String> {
         if !model_path.is_file() {
             return Err(format!("model file not found: {}", model_path.display()));
@@ -107,23 +115,47 @@ impl Engine {
         };
 
         log::info!(
-            "engine: {} threads, task {:?}, single-pass decode: {}",
+            "engine: {} threads, task {:?}, single-pass decode: {}, r2t2 cadence: {} ms",
             threads,
             task,
-            run_ext.is_some()
+            run_ext.is_some(),
+            r2t2_cadence_ms
         );
-        let options = transcribe_cpp::SessionOptions {
+        let session_options = transcribe_cpp::SessionOptions {
             n_threads: threads,
             ..Default::default()
         };
-        let session = model.session_with(&options).map_err(|e| e.to_string())?;
+        let session = model.session_with(&session_options).map_err(|e| e.to_string())?;
         Ok(Engine {
+            model,
             session,
+            session_options,
             language,
             task,
             run_ext,
             ready_status,
+            r2t2_cadence_ms,
         })
+    }
+
+    /// Checks whether the loaded model supports streaming.
+    pub fn supports_streaming(&self) -> bool {
+        self.model.capabilities().supports_streaming
+    }
+
+    /// Checks whether the loaded model accepts the Confucius4-R2T2 native streaming extension.
+    pub fn is_r2t2(&self) -> bool {
+        self.model.accepts_ext(
+            transcribe_cpp::ExtSlot::Stream,
+            transcribe_cpp::sys::TRANSCRIBE_EXT_KIND_R2T2_STREAM,
+        )
+    }
+
+    /// Spawns a dedicated session for a streaming dictation run.
+    pub fn stream_session(&self) -> Result<transcribe_cpp::Session, String> {
+        self.model
+            .session_with(&self.session_options)
+            .map_err(|e| e.to_string())
     }
 
     /// Transcribes 16 kHz mono f32 samples to text. Input longer than
@@ -457,11 +489,15 @@ fn do_load(env: &mut JNIEnv, context: &JObject) -> Result<(), String> {
         .and_then(|s| s.parse::<i32>().ok())
         .filter(|&n| n > 0)
         .unwrap_or_else(performance_core_count);
+    let r2t2_cadence_ms = read_config(&files_dir.join(MODEL_R2T2_CADENCE_FILE))
+        .and_then(|s| s.parse::<u32>().ok())
+        .map(|ms| ms.clamp(80, 2000))
+        .unwrap_or(320);
 
     if let Some(name) = read_config(&files_dir.join(ACTIVE_MODEL_FILE)) {
         let path = files_dir.join("models").join(&name);
         notify_status(env, context, &format!("Loading model {}...", name));
-        match Engine::load(&path, language.clone(), translate, threads) {
+        match Engine::load(&path, language.clone(), translate, threads, r2t2_cadence_ms) {
             Ok(engine) => {
                 let status = engine.ready_status;
                 *GLOBAL_ENGINE.lock().unwrap() = Some(Arc::new(Mutex::new(engine)));
@@ -490,7 +526,7 @@ fn do_load(env: &mut JNIEnv, context: &JObject) -> Result<(), String> {
 
     notify_status(env, context, "Loading model...");
 
-    match Engine::load(&path, language, translate, threads) {
+    match Engine::load(&path, language, translate, threads, r2t2_cadence_ms) {
         Ok(engine) => {
             let status = engine.ready_status;
             *GLOBAL_ENGINE.lock().unwrap() = Some(Arc::new(Mutex::new(engine)));

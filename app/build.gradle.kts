@@ -8,6 +8,7 @@ plugins {
 android {
     namespace = "dev.notune.transcribe"
     compileSdk = 35
+    ndkVersion = "30.0.14904198"
 
     defaultConfig {
         applicationId = "dev.notune.transcribe"
@@ -124,7 +125,7 @@ val cargoNdkBuild by tasks.registering(Exec::class) {
     // arm64 phones from ~2018 on; the engine refuses older CPUs with a clear
     // error at load (see check_cpu_features in src/engine.rs) instead of
     // crashing mid-inference.
-    environment("TRANSCRIBE_CMAKE_ARGS", "-DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod+fp16")
+    environment("TRANSCRIBE_CMAKE_ARGS", "-DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod+fp16 -DTRANSCRIBE_MODEL_SET=minimal-multilingual")
 
     val jniLibsDir = project.file("src/main/jniLibs")
     val cargoExecutable = System.getenv("CARGO")

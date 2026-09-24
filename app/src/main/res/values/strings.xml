@@ -69,6 +69,7 @@
     <string name="model_desc_nemotron">40 languages incl. Chinese, Japanese, Korean, Arabic, Hindi; with punctuation</string>
     <string name="model_desc_parakeet_v3_q8">Like the built-in model, higher precision</string>
     <string name="model_desc_whisper_turbo">99 languages, most accurate in this list; can\'t translate</string>
+    <string name="model_desc_r2t2">Confucius4-R2T2 1.7B streaming, ultra low-latency (80-2000ms), 1.18 GB</string>
     <string name="model_desc_browse">Browse all transcribe.cpp models</string>
     <string name="models_no_browser">No browser found to open the link.</string>
     <string name="models_delete">Delete model</string>
@@ -83,6 +84,9 @@
     <string name="models_threads_section">CPU threads</string>
     <string name="models_threads_desc">Threads used for transcription. “Automatic” picks a value based on this device\'s CPU. If transcription is slow, try different values; more threads is not always faster.</string>
     <string name="models_threads_auto">Automatic</string>
+    <string name="models_r2t2_cadence_section">R2T2 streaming cadence</string>
+    <string name="models_r2t2_cadence_desc">Cadence in milliseconds for Confucius4-R2T2 native streaming. Lower values give faster real-time updates; higher values increase batch efficiency (default 320 ms).</string>
+    <string name="models_r2t2_cadence_saved">Cadence saved</string>
 
     <string name="section_benchmark">Benchmark</string>
     <string name="desc_benchmark">Measures how fast the active model transcribes on this device, using a built-in English test recording (11 s).</string>

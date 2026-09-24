@@ -53,6 +53,10 @@
     <string name="model_desc_nemotron">40 языков, вкл. китайский, японский, корейский, арабский, хинди; с пунктуацией</string>
     <string name="model_desc_parakeet_v3_q8">Как встроенная модель, но точнее</string>
     <string name="model_desc_whisper_turbo">99 языков, самая точная в этом списке; не переводит</string>
+    <string name="model_desc_r2t2">Confucius4-R2T2 1.7B стриминг, сверхнизкая задержка (80–2000 мс), 1.18 ГБ</string>
+    <string name="models_r2t2_cadence_section">Каденция стриминга R2T2</string>
+    <string name="models_r2t2_cadence_desc">Интервал в миллисекундах для нативного стриминга Confucius4-R2T2. Меньшие значения обеспечивают более быстрые обновления; большие значения повышают эффективность (по умолчанию 320 мс).</string>
+    <string name="models_r2t2_cadence_saved">Каденция сохранена</string>
     <string name="model_desc_browse">Все модели transcribe.cpp</string>
     <string name="models_desc">Встроенная модель работает сразу. Вы также можете импортировать любую скачанную модель GGUF для transcribe.cpp. Приложение остаётся полностью офлайн; загрузки выполняются в браузере. Голосовая клавиатура применяет смену модели после перезапуска.</string>
     <string name="models_loading">Загрузка модели…</string>

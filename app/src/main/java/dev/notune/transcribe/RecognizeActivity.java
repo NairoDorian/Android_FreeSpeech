@@ -148,6 +148,16 @@ public class RecognizeActivity extends AppCompatActivity {
         runOnUiThread(() -> micLevel.setLevel(level));
     }
 
+    // Called from Rust during streaming dictation (R2T2, Parakeet)
+    public void onPartialText(String committed, String tentative) {
+        runOnUiThread(() -> {
+            String full = (committed != null ? committed : "") + (tentative != null ? tentative : "");
+            if (!full.isEmpty()) {
+                status.setText(full);
+            }
+        });
+    }
+
     // Called from Rust – keep same method name as IME for code reuse
     public void onTextTranscribed(String text) {
         runOnUiThread(() -> {

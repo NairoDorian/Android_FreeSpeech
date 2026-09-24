@@ -92,6 +92,8 @@ public class ModelsActivity extends AppCompatActivity {
                     "https://huggingface.co/handy-computer/parakeet-tdt-0.6b-v3-gguf/resolve/main/parakeet-tdt-0.6b-v3-Q8_0.gguf"),
             new ModelLink("Whisper Large-v3-Turbo", R.string.model_desc_whisper_turbo, "845 MB",
                     "https://huggingface.co/handy-computer/whisper-large-v3-turbo-gguf/resolve/main/whisper-large-v3-turbo-Q8_0.gguf"),
+            new ModelLink("Confucius4-R2T2 (Arm M)", R.string.model_desc_r2t2, "1.18 GB",
+                    "https://huggingface.co/handy-computer/Confucius4-R2T2-gguf/resolve/main/r2t2-q4_k_m.gguf"),
             new ModelLink("huggingface.co/handy-computer", R.string.model_desc_browse, "",
                     "https://huggingface.co/handy-computer"),
     };
@@ -128,6 +130,7 @@ public class ModelsActivity extends AppCompatActivity {
 
         setupLanguageSpinner();
         setupThreadsSpinner();
+        setupR2T2CadenceSpinner();
 
         com.google.android.material.materialswitch.MaterialSwitch translateSwitch =
                 findViewById(R.id.switch_translate);
@@ -229,6 +232,64 @@ public class ModelsActivity extends AppCompatActivity {
                 String value = values.get(position);
                 if (value.equals(readConfig("model_threads"))) return;
                 writeConfig("model_threads", value);
+                statusText.setText(getString(R.string.models_loading));
+                reloadModelNative(ModelsActivity.this);
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
+    }
+
+    // --- R2T2 Streaming Cadence ---------------------------------------------
+
+    /**
+     * R2T2 native streaming chunk cadence in ms, stored in {@code model_r2t2_cadence}.
+     * Empty = default (320 ms). Values cover: 80 (Ultra), 160 (Fast), 320 (Balanced), 640 (Accurate), 1280 (High Latency).
+     */
+    private void setupR2T2CadenceSpinner() {
+        Spinner spinner = findViewById(R.id.spinner_r2t2_cadence);
+        if (spinner == null) return;
+        String stored = readConfig("model_r2t2_cadence");
+
+        List<String> values = new ArrayList<>(
+                Arrays.asList("", "80", "160", "320", "640", "1280"));
+        if (!stored.isEmpty() && !values.contains(stored)) {
+            values.add(stored);
+        }
+
+        List<String> labels = new ArrayList<>(values.size());
+        for (String v : values) {
+            if (v.isEmpty()) {
+                labels.add("320 ms (Default / Balanced)");
+            } else if ("80".equals(v)) {
+                labels.add("80 ms (Ultra Low Latency)");
+            } else if ("160".equals(v)) {
+                labels.add("160 ms (Fast)");
+            } else if ("320".equals(v)) {
+                labels.add("320 ms (Balanced)");
+            } else if ("640".equals(v)) {
+                labels.add("640 ms (Accurate)");
+            } else if ("1280".equals(v)) {
+                labels.add("1280 ms (High Latency)");
+            } else {
+                labels.add(v + " ms");
+            }
+        }
+
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(
+                this, android.R.layout.simple_spinner_item, labels);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spinner.setAdapter(adapter);
+        spinner.setSelection(Math.max(0, values.indexOf(stored)), false);
+        spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                String value = values.get(position);
+                if (value.equals(readConfig("model_r2t2_cadence"))) return;
+                writeConfig("model_r2t2_cadence", value);
+                snackbar(getString(R.string.models_r2t2_cadence_saved));
                 statusText.setText(getString(R.string.models_loading));
                 reloadModelNative(ModelsActivity.this);
             }

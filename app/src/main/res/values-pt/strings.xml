@@ -53,6 +53,10 @@
     <string name="model_desc_nemotron">40 idiomas incl. chinês, japonês, coreano, árabe, híndi; com pontuação</string>
     <string name="model_desc_parakeet_v3_q8">Como o modelo integrado, maior precisão</string>
     <string name="model_desc_whisper_turbo">99 idiomas, o mais preciso desta lista; não traduz</string>
+    <string name="model_desc_r2t2">Confucius4-R2T2 1.7B streaming, latência ultrabaixa (80-2000 ms), 1.18 GB</string>
+    <string name="models_r2t2_cadence_section">Cadência de streaming R2T2</string>
+    <string name="models_r2t2_cadence_desc">Cadência em milissegundos para streaming nativo Confucius4-R2T2. Valores menores geram atualizações mais rápidas; valores maiores aumentam a eficiência (padrão 320 ms).</string>
+    <string name="models_r2t2_cadence_saved">Cadência salva</string>
     <string name="model_desc_browse">Ver todos os modelos transcribe.cpp</string>
     <string name="models_desc">O modelo integrado funciona imediatamente. Você também pode importar qualquer modelo GGUF do transcribe.cpp que tenha baixado. O app permanece totalmente offline; os downloads acontecem no seu navegador. O teclado de voz aplica uma troca de modelo após reiniciar.</string>
     <string name="models_loading">Carregando modelo…</string>

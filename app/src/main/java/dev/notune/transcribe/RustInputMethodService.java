@@ -412,6 +412,13 @@ public class RustInputMethodService extends InputMethodService {
             Log.d(TAG, "Status: " + status);
             lastStatus = status;
             updateUiState();
+            if ("Canceled".equals(status)) {
+                InputConnection ic = getCurrentInputConnection();
+                if (ic != null) {
+                    ic.setComposingText("", 1);
+                    ic.finishComposingText();
+                }
+            }
             if (pendingSwitchBack && status.startsWith("Error")) {
                 pendingSwitchBack = false;
                 switchToPreviousInputMethod();
@@ -458,9 +465,27 @@ public class RustInputMethodService extends InputMethodService {
         }
     }
 
+    // Called from Rust during streaming dictation (R2T2, Parakeet)
+    public void onPartialText(String committed, String tentative) {
+        mainHandler.post(() -> {
+            if (!inputActive) return;
+            InputConnection ic = getCurrentInputConnection();
+            if (ic != null) {
+                String full = (committed != null ? committed : "") + (tentative != null ? tentative : "");
+                if (!full.isEmpty()) {
+                    ic.setComposingText(full, 1);
+                }
+            }
+        });
+    }
+
     // Called from Rust
     public void onTextTranscribed(String text) {
         mainHandler.post(() -> {
+            InputConnection ic = getCurrentInputConnection();
+            if (ic != null) {
+                ic.finishComposingText();
+            }
             if (text == null || text.trim().isEmpty()) {
                 // Nothing recognized — don't insert a stray space.
                 updateRecordButtonUI(false);
@@ -476,7 +501,6 @@ public class RustInputMethodService extends InputMethodService {
                 return;
             }
             String committed = text + " ";
-            InputConnection ic = getCurrentInputConnection();
             if (inputActive && ic != null) {
                 commitTranscribedText(ic, committed);
             } else {
