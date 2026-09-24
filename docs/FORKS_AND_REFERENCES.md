@@ -11,7 +11,7 @@ This document catalogs the upstream forks, comparison URLs, and reference reposi
 | **caminante-blanco** | [Compare with upstream main](https://github.com/notune/android_transcribe_app/compare/main...caminante-blanco:android_transcribe_app:main) | Real-time streaming support for Moonshine and Nemotron models; CI build improvements skipping signing when secrets are absent. |
 | **dmtnndxr** | [Compare with upstream main](https://github.com/notune/android_transcribe_app/compare/main...dmtnndxr:android_transcribe_app:main) | Optional LLM post-processing of transcriptions (AI cleanup via OpenRouter/API); portable NDK host path detection (Windows/macOS/Linux); independently installable Plus build. |
 | **classic-ally** | [Compare with upstream main](https://github.com/notune/android_transcribe_app/compare/main...classic-ally:android_transcribe_app:main) | Opt-in live streaming preview to the voice keyboard; discard button and configurable preview refresh interval. |
-| **dscho** | [Compare with upstream main](https://github.com/notune/android_transcribe_app/compare/main...dscho:android_transcribe_app:main) | IME streaming dictation rendered as composing text (`InputConnection.setComposingText`); `android.speech.RecognitionService` implementation; R8 release minification. |
+| **dscho** | [Compare with upstream main](https://github.com/notune/android_transcribe_app/compare/main...dscho:android_transcribe_app:main) | Key implementation solving [Issue #39](https://github.com/notune/android_transcribe_app/issues/39) by providing system `android.speech.RecognitionService` (`OfflineRecognitionService.java`); breakthrough IME streaming dictation rendered as composing text (`InputConnection.setComposingText`) in commit `c1156a3`; decibel audio metering (`cb.rmsChanged`); R8 release minification. Documented in [`docs/RECOGNITION_SERVICE.md`](RECOGNITION_SERVICE.md). |
 | **mw-el (TRANSKRIPT)** | [Compare with upstream main](https://github.com/notune/android_transcribe_app/compare/main...mw-el:TRANSKRIPT:main) | Complete Anthropic/Claude-inspired UI redesign; dedicated audio file transcription with chunk decoding (avoiding Java-heap OOM); DictateActivity with waveform; recordings manager; offline TTS via Sherpa-ONNX + Thorsten-Medium (Piper VITS); Voice Chat mode; multi-language post-processing. |
 | **Nicfox77** | [Compare with upstream main](https://github.com/notune/android_transcribe_app/compare/main...Nicfox77:android_transcribe_app:main) | Inspectable streaming IME builds, self-reporting CI workflows, and PR verification builds. |
 | **arthow4n** | [Compare with upstream main](https://github.com/notune/android_transcribe_app/compare/main...arthow4n:android_transcribe_app:main) | Traditional Chinese language conversion (Taiwan); keyboard streaming dictation with live speed/WPM stats; configurable filler word filter and punctuation cleanup; buffered streaming dictation with Parakeet Unified EN; model memory per language. |
@@ -206,7 +206,8 @@ Android_FreeSpeech/
     ├── TRANSCRIBE_CPP_MIGRATION_PLAN.md
     ├── R2T2_INTEGRATION_PLAN.md
     ├── CALL_RECORDING_STT_ARCHITECTURE.md
-    └── FUTO.md
+    ├── FUTO.md
+    └── RECOGNITION_SERVICE.md
 ```
 
 *(Note: `other_forks/` and `reference_repos/` are ignored in `.gitignore` so they remain on disk for developer reference without bloating the main Git repository).*
