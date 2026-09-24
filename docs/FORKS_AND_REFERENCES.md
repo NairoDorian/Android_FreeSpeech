@@ -205,8 +205,10 @@ Android_FreeSpeech/
     ├── UPSTREAM_PRS_REFERENCE.md
     ├── TRANSCRIBE_CPP_MIGRATION_PLAN.md
     ├── R2T2_INTEGRATION_PLAN.md
-    └── CALL_RECORDING_STT_ARCHITECTURE.md
+    ├── CALL_RECORDING_STT_ARCHITECTURE.md
+    └── FUTO.md
 ```
 
 *(Note: `other_forks/` and `reference_repos/` are ignored in `.gitignore` so they remain on disk for developer reference without bloating the main Git repository).*
+
 
