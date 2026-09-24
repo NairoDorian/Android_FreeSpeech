@@ -319,19 +319,19 @@ fn run_inference_consumer(
         }
     };
 
-    let (supports_streaming, is_r2t2, r2t2_cadence, lang, task) = {
+    let (supports_streaming, is_r2t2, stream_opts, lang, task) = {
         let guard = eng_arc.lock().unwrap_or_else(|e| e.into_inner());
         (
             guard.supports_streaming(),
             guard.is_r2t2(),
-            guard.r2t2_cadence_ms,
+            guard.default_stream_options(),
             guard.language.clone(),
             guard.task,
         )
     };
 
     if supports_streaming {
-        // --- Native Streaming Pipeline (Confucius4-R2T2, Parakeet, etc.) ---
+        // --- Native Streaming Pipeline (Nemotron 3.5, Parakeet, Confucius4-R2T2, etc.) ---
         let mut session = {
             let guard = eng_arc.lock().unwrap_or_else(|e| e.into_inner());
             match guard.stream_session() {
@@ -344,27 +344,6 @@ fn run_inference_consumer(
                     return;
                 }
             }
-        };
-
-        let stream_opts = transcribe_cpp::StreamOptions {
-            commit_policy: transcribe_cpp::CommitPolicy::Auto,
-            family: if is_r2t2 {
-                log::info!("Starting R2T2 native stream with cadence: {} ms", r2t2_cadence);
-                Some(transcribe_cpp::StreamExtension::R2T2(
-                    transcribe_cpp::R2T2StreamOptions {
-                        chunk_size_ms: Some(r2t2_cadence),
-                    },
-                ))
-            } else {
-                Some(transcribe_cpp::StreamExtension::ParakeetStream(
-                    transcribe_cpp::ParakeetStreamOptions {
-                        att_context_right: Some(1),
-                    },
-                ))
-            },
-            enable_vad: !is_r2t2,
-            vad_threshold: 0.50,
-            ..Default::default()
         };
 
         let mut cur_lang = if is_r2t2 {

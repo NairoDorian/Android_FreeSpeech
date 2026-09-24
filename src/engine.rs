@@ -166,6 +166,62 @@ impl Engine {
         )
     }
 
+    /// Builds the appropriate family stream extension based on the model's capabilities.
+    pub fn default_stream_extension(&self) -> Option<transcribe_cpp::StreamExtension> {
+        if self.is_r2t2() {
+            Some(transcribe_cpp::StreamExtension::R2T2(
+                transcribe_cpp::R2T2StreamOptions {
+                    chunk_size_ms: Some(self.r2t2_cadence_ms),
+                },
+            ))
+        } else if self.model.accepts_ext(
+            transcribe_cpp::ExtSlot::Stream,
+            transcribe_cpp::sys::TRANSCRIBE_EXT_KIND_PARAKEET_STREAM,
+        ) {
+            // Nemotron 3.5 & Parakeet Cache-Aware: att_context_right: None passes -1,
+            // which instructs the engine to use the model's native default trained context.
+            Some(transcribe_cpp::StreamExtension::ParakeetStream(
+                transcribe_cpp::ParakeetStreamOptions {
+                    att_context_right: None,
+                },
+            ))
+        } else if self.model.accepts_ext(
+            transcribe_cpp::ExtSlot::Stream,
+            transcribe_cpp::sys::TRANSCRIBE_EXT_KIND_PARAKEET_BUFFERED_STREAM,
+        ) {
+            Some(transcribe_cpp::StreamExtension::ParakeetBuffered(
+                transcribe_cpp::ParakeetBufferedStreamOptions::default(),
+            ))
+        } else if self.model.accepts_ext(
+            transcribe_cpp::ExtSlot::Stream,
+            transcribe_cpp::sys::TRANSCRIBE_EXT_KIND_MOONSHINE_STREAMING_STREAM,
+        ) {
+            Some(transcribe_cpp::StreamExtension::MoonshineStreaming(
+                transcribe_cpp::MoonshineStreamingOptions::default(),
+            ))
+        } else if self.model.accepts_ext(
+            transcribe_cpp::ExtSlot::Stream,
+            transcribe_cpp::sys::TRANSCRIBE_EXT_KIND_VOXTRAL_REALTIME_STREAM,
+        ) {
+            Some(transcribe_cpp::StreamExtension::VoxtralRealtime(
+                transcribe_cpp::VoxtralRealtimeStreamOptions::default(),
+            ))
+        } else {
+            None
+        }
+    }
+
+    /// Builds default stream options tailored for the active model.
+    pub fn default_stream_options(&self) -> transcribe_cpp::StreamOptions {
+        transcribe_cpp::StreamOptions {
+            commit_policy: transcribe_cpp::CommitPolicy::Auto,
+            family: self.default_stream_extension(),
+            enable_vad: false,
+            vad_threshold: 0.50,
+            ..Default::default()
+        }
+    }
+
     /// Spawns a dedicated session for a streaming dictation run.
     pub fn stream_session(&self) -> Result<transcribe_cpp::Session, String> {
         self.model

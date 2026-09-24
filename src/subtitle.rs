@@ -130,23 +130,23 @@ pub unsafe extern "system" fn Java_dev_notune_transcribe_LiveSubtitleService_ini
         }
     };
 
-    let (supports_streaming, is_r2t2, r2t2_cadence, lang, task) = if let Some(ref eng) = engine_arc {
+    let (supports_streaming, is_r2t2, stream_opts, lang, task) = if let Some(ref eng) = engine_arc {
         let guard = eng.lock().unwrap_or_else(|e| e.into_inner());
         (
             guard.supports_streaming(),
             guard.is_r2t2(),
-            guard.r2t2_cadence_ms,
+            guard.default_stream_options(),
             guard.language.clone(),
             guard.task,
         )
     } else {
-        (false, false, 320, None, transcribe_cpp::Task::Transcribe)
+        (false, false, transcribe_cpp::StreamOptions::default(), None, transcribe_cpp::Task::Transcribe)
     };
 
     if supports_streaming {
         let (tx, rx) = crossbeam_channel::bounded::<Vec<f32>>(256);
         let eng = engine_arc.unwrap();
-        run_streaming_subtitle_worker(vm, service_ref, rx, eng, is_r2t2, r2t2_cadence, lang, task);
+        run_streaming_subtitle_worker(vm, service_ref, rx, eng, is_r2t2, stream_opts, lang, task);
 
         *LIVE_STATE.lock().unwrap() = Some(LiveSubtitleState {
             is_streaming: true,
@@ -191,7 +191,7 @@ fn run_streaming_subtitle_worker(
     rx: crossbeam_channel::Receiver<Vec<f32>>,
     eng_arc: Arc<Mutex<engine::Engine>>,
     is_r2t2: bool,
-    r2t2_cadence: u32,
+    stream_opts: transcribe_cpp::StreamOptions,
     lang: Option<String>,
     task: transcribe_cpp::Task,
 ) {
@@ -225,27 +225,6 @@ fn run_streaming_subtitle_worker(
                     return;
                 }
             }
-        };
-
-        let stream_opts = transcribe_cpp::StreamOptions {
-            commit_policy: transcribe_cpp::CommitPolicy::Auto,
-            family: if is_r2t2 {
-                log::info!("LiveSubtitle starting R2T2 native stream with cadence: {} ms", r2t2_cadence);
-                Some(transcribe_cpp::StreamExtension::R2T2(
-                    transcribe_cpp::R2T2StreamOptions {
-                        chunk_size_ms: Some(r2t2_cadence),
-                    },
-                ))
-            } else {
-                Some(transcribe_cpp::StreamExtension::ParakeetStream(
-                    transcribe_cpp::ParakeetStreamOptions {
-                        att_context_right: Some(1),
-                    },
-                ))
-            },
-            enable_vad: !is_r2t2,
-            vad_threshold: 0.50,
-            ..Default::default()
         };
 
         let mut cur_lang = if is_r2t2 {

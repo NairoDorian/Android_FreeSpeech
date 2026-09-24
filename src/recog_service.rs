@@ -162,17 +162,17 @@ pub unsafe extern "system" fn Java_dev_notune_transcribe_VoiceRecognitionService
         }
     }
 
-    let (supports_streaming, is_r2t2, r2t2_cadence, lang, task) = if let Some(eng_arc) = engine::get_engine() {
+    let (supports_streaming, is_r2t2, stream_opts, lang, task) = if let Some(eng_arc) = engine::get_engine() {
         let guard = eng_arc.lock().unwrap_or_else(|e| e.into_inner());
         (
             guard.supports_streaming(),
             guard.is_r2t2(),
-            guard.r2t2_cadence_ms,
+            guard.default_stream_options(),
             guard.language.clone(),
             guard.task,
         )
     } else {
-        (false, false, 320, None, transcribe_cpp::Task::Transcribe)
+        (false, false, transcribe_cpp::StreamOptions::default(), None, transcribe_cpp::Task::Transcribe)
     };
 
     let (tx_opt, rx_opt) = if supports_streaming {
@@ -257,7 +257,7 @@ pub unsafe extern "system" fn Java_dev_notune_transcribe_VoiceRecognitionService
                 stream_worker_shared,
                 rx,
                 is_r2t2,
-                r2t2_cadence,
+                stream_opts,
                 lang,
                 task,
             );
@@ -461,7 +461,7 @@ fn run_streaming_worker(
     shared: Arc<Endpoint>,
     rx: crossbeam_channel::Receiver<Vec<f32>>,
     is_r2t2: bool,
-    r2t2_cadence: u32,
+    stream_opts: transcribe_cpp::StreamOptions,
     lang: Option<String>,
     task: transcribe_cpp::Task,
 ) {
@@ -479,26 +479,6 @@ fn run_streaming_worker(
                 return;
             }
         }
-    };
-
-    let stream_opts = transcribe_cpp::StreamOptions {
-        commit_policy: transcribe_cpp::CommitPolicy::Auto,
-        family: if is_r2t2 {
-            Some(transcribe_cpp::StreamExtension::R2T2(
-                transcribe_cpp::R2T2StreamOptions {
-                    chunk_size_ms: Some(r2t2_cadence),
-                },
-            ))
-        } else {
-            Some(transcribe_cpp::StreamExtension::ParakeetStream(
-                transcribe_cpp::ParakeetStreamOptions {
-                    att_context_right: Some(1),
-                },
-            ))
-        },
-        enable_vad: !is_r2t2,
-        vad_threshold: 0.50,
-        ..Default::default()
     };
 
     let mut cur_lang = if is_r2t2 {
