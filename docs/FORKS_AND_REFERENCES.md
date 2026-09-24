@@ -207,7 +207,8 @@ Android_FreeSpeech/
     ├── R2T2_INTEGRATION_PLAN.md
     ├── CALL_RECORDING_STT_ARCHITECTURE.md
     ├── FUTO.md
-    └── RECOGNITION_SERVICE.md
+    ├── RECOGNITION_SERVICE.md
+    └── R2T2_STREAMING_PLAN.md
 ```
 
 *(Note: `other_forks/` and `reference_repos/` are ignored in `.gitignore` so they remain on disk for developer reference without bloating the main Git repository).*
