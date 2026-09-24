@@ -388,6 +388,8 @@ fn run_inference_consumer(
         let _ = stream.feed(&vec![0.0f32; 3200]);
 
         const FEED_CHUNK_SAMPLES: usize = 1600; // 100 ms
+        const BACKLOG_TRIM_SAMPLES: usize = 48000; // 3.0 s at 16 kHz
+        const BACKLOG_KEEP_TAIL_SAMPLES: usize = 16000; // 1.0 s at 16 kHz
         let mut pcm_buf: Vec<f32> = Vec::with_capacity(FEED_CHUNK_SAMPLES * 4);
 
         while let Ok(chunk) = rx.recv() {
@@ -397,6 +399,19 @@ fn run_inference_consumer(
             }
 
             pcm_buf.extend_from_slice(&chunk);
+
+            // Backlog trim: if the consumer stalled (post-unfreeze hiccup, page
+            // faults) and audio piled up, skip forward to the recent tail rather
+            // than grinding through the whole backlog while more arrives.
+            if pcm_buf.len() > BACKLOG_TRIM_SAMPLES {
+                let dropped = pcm_buf.len() - BACKLOG_KEEP_TAIL_SAMPLES;
+                pcm_buf.drain(..dropped);
+                log::warn!(
+                    "audio backlog {:.1}s; dropped {:.1}s oldest",
+                    (dropped + BACKLOG_KEEP_TAIL_SAMPLES) as f32 / 16000.0,
+                    dropped as f32 / 16000.0
+                );
+            }
 
             while pcm_buf.len() >= FEED_CHUNK_SAMPLES {
                 let feed_slice: Vec<f32> = pcm_buf.drain(..FEED_CHUNK_SAMPLES).collect();

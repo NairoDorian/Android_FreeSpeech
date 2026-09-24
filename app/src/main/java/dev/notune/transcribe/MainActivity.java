@@ -1,12 +1,15 @@
 package dev.notune.transcribe;
 
+import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.content.res.ColorStateList;
 import android.os.Bundle;
 import android.provider.Settings;
+import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
+import android.speech.SpeechRecognizer;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.View;
@@ -50,6 +53,10 @@ public class MainActivity extends AppCompatActivity {
     private Button startSubsButton;
     private Button benchButton;
     private TextView benchResultText;
+    private Button recognitionTestButton;
+    private TextView recognitionTestStatus;
+    private SpeechRecognizer testRecognizer;
+    private boolean isTestingRecognition = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -64,10 +71,21 @@ public class MainActivity extends AppCompatActivity {
         startSubsButton = findViewById(R.id.btn_subs_start);
         Button imeSettingsButton = findViewById(R.id.btn_ime_settings);
         Button voiceHelpButton = findViewById(R.id.btn_voice_help);
+        recognitionTestButton = findViewById(R.id.btn_recognition_test);
+        recognitionTestStatus = findViewById(R.id.text_recognition_test_status);
 
         voiceGrantButton.setOnClickListener(v -> checkAndRequestPermissions());
         voiceTryButton.setOnClickListener(v -> launchVoiceTest());
         voiceHelpButton.setOnClickListener(v -> showHelpDialog());
+        if (recognitionTestButton != null) {
+            recognitionTestButton.setOnClickListener(v -> {
+                if (isTestingRecognition) {
+                    stopRecognitionTest();
+                } else {
+                    startRecognitionTest();
+                }
+            });
+        }
 
         imeSettingsButton.setOnClickListener(v -> {
              Intent intent = new Intent(Settings.ACTION_INPUT_METHOD_SETTINGS);
@@ -406,6 +424,124 @@ public class MainActivity extends AppCompatActivity {
                 startSubsButton.setEnabled(true);
             }
         });
+    }
+
+    private void startRecognitionTest() {
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            if (recognitionTestStatus != null) {
+                recognitionTestStatus.setText("Grant microphone permission first.");
+            }
+            return;
+        }
+        if (testRecognizer != null) {
+            try { testRecognizer.destroy(); } catch (Throwable ignored) {}
+            testRecognizer = null;
+        }
+        ComponentName comp = new ComponentName(this, VoiceRecognitionService.class);
+        try {
+            testRecognizer = SpeechRecognizer.createSpeechRecognizer(this, comp);
+        } catch (Throwable t) {
+            if (recognitionTestStatus != null) {
+                recognitionTestStatus.setText("createSpeechRecognizer failed: " + t.getMessage());
+            }
+            return;
+        }
+        testRecognizer.setRecognitionListener(new RecognitionListener() {
+            @Override public void onReadyForSpeech(Bundle params) {
+                if (recognitionTestStatus != null) recognitionTestStatus.setText("Ready for speech (speak now)...");
+            }
+            @Override public void onBeginningOfSpeech() {
+                if (recognitionTestStatus != null) recognitionTestStatus.setText("Beginning of speech detected.");
+            }
+            @Override public void onRmsChanged(float rmsdB) {}
+            @Override public void onBufferReceived(byte[] buffer) {}
+            @Override public void onEndOfSpeech() {
+                if (recognitionTestStatus != null) recognitionTestStatus.setText("End of speech. Processing...");
+            }
+            @Override public void onError(int error) {
+                if (recognitionTestStatus != null) recognitionTestStatus.setText("Error: " + errorToString(error));
+                finishRecognitionTest();
+            }
+            @Override public void onResults(Bundle results) {
+                ArrayList<String> matches = results.getStringArrayList(
+                        SpeechRecognizer.RESULTS_RECOGNITION);
+                String text = (matches != null && !matches.isEmpty())
+                        ? matches.get(0) : "(empty)";
+                if (recognitionTestStatus != null) recognitionTestStatus.setText("Final: " + text);
+                finishRecognitionTest();
+            }
+            @Override public void onPartialResults(Bundle partialResults) {
+                ArrayList<String> matches = partialResults.getStringArrayList(
+                        SpeechRecognizer.RESULTS_RECOGNITION);
+                String text = (matches != null && !matches.isEmpty())
+                        ? matches.get(0) : "";
+                if (recognitionTestStatus != null) recognitionTestStatus.setText("Streaming: " + text);
+            }
+            @Override public void onEvent(int eventType, Bundle params) {}
+        });
+
+        Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                          RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+        try {
+            testRecognizer.startListening(intent);
+        } catch (Throwable t) {
+            if (recognitionTestStatus != null) {
+                recognitionTestStatus.setText("startListening failed: " + t.getMessage());
+            }
+            finishRecognitionTest();
+            return;
+        }
+        isTestingRecognition = true;
+        if (recognitionTestButton != null) {
+            recognitionTestButton.setText(R.string.btn_recognition_test_stop);
+        }
+        if (recognitionTestStatus != null) {
+            recognitionTestStatus.setText("Starting...");
+        }
+    }
+
+    private void stopRecognitionTest() {
+        if (testRecognizer != null) {
+            try { testRecognizer.stopListening(); } catch (Throwable ignored) {}
+        }
+    }
+
+    private void finishRecognitionTest() {
+        isTestingRecognition = false;
+        if (recognitionTestButton != null) {
+            recognitionTestButton.setText(R.string.btn_recognition_test_start);
+        }
+        if (testRecognizer != null) {
+            try { testRecognizer.destroy(); } catch (Throwable ignored) {}
+            testRecognizer = null;
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (testRecognizer != null) {
+            try { testRecognizer.destroy(); } catch (Throwable ignored) {}
+            testRecognizer = null;
+        }
+    }
+
+    private static String errorToString(int code) {
+        switch (code) {
+            case SpeechRecognizer.ERROR_AUDIO: return "AUDIO (3)";
+            case SpeechRecognizer.ERROR_CLIENT: return "CLIENT (5)";
+            case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS: return "INSUFFICIENT_PERMISSIONS (9)";
+            case SpeechRecognizer.ERROR_NETWORK: return "NETWORK (2)";
+            case SpeechRecognizer.ERROR_NETWORK_TIMEOUT: return "NETWORK_TIMEOUT (1)";
+            case SpeechRecognizer.ERROR_NO_MATCH: return "NO_MATCH (7)";
+            case SpeechRecognizer.ERROR_RECOGNIZER_BUSY: return "RECOGNIZER_BUSY (8)";
+            case SpeechRecognizer.ERROR_SERVER: return "SERVER (4)";
+            case SpeechRecognizer.ERROR_SPEECH_TIMEOUT: return "SPEECH_TIMEOUT (6)";
+            default: return "code " + code;
+        }
     }
 
     private native void initNative(MainActivity activity);

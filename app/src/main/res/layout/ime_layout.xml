@@ -31,6 +31,21 @@
             android:layout_width="24dp"
             android:layout_height="24dp"
             android:visibility="gone"/>
+
+        <!-- Discard: cancel recording and clear composing text without committing -->
+        <ImageView
+            android:id="@+id/ime_discard"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:src="@drawable/ic_close"
+            android:scaleType="centerInside"
+            android:background="@drawable/bg_ime_key"
+            android:tint="?attr/colorError"
+            android:clickable="true"
+            android:focusable="true"
+            android:visibility="gone"
+            android:layout_marginStart="8dp"
+            android:contentDescription="@string/ime_discard"/>
     </LinearLayout>
 
     <!-- Record area: pulsing mic-level glow behind a circular record button -->

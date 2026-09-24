@@ -134,6 +134,20 @@ public class VoiceRecognitionService extends RecognitionService {
         });
     }
 
+    public void onPartialResults(String committed, String tentative) {
+        mainHandler.post(() -> {
+            Callback cb = mCallback;
+            if (cb == null) return;
+            String full = (committed != null ? committed : "") + (tentative != null ? tentative : "");
+            if (full.trim().isEmpty()) return;
+            ArrayList<String> hypotheses = new ArrayList<>();
+            hypotheses.add(full.trim());
+            Bundle bundle = new Bundle();
+            bundle.putStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION, hypotheses);
+            try { cb.partialResults(bundle); } catch (RemoteException ignored) {}
+        });
+    }
+
     public void onResults(String text) {
         mainHandler.post(() -> {
             Callback cb = mCallback;

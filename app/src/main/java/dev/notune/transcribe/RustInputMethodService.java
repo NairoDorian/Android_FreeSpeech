@@ -16,8 +16,13 @@ import android.content.Context;
 import android.content.pm.PackageManager;
 import android.view.MotionEvent;
 import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.ExtractedText;
+import android.view.inputmethod.ExtractedTextRequest;
 import android.content.res.ColorStateList;
 import android.view.ContextThemeWrapper;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
+import android.text.style.UnderlineSpan;
 import java.io.File;
 
 import com.google.android.material.color.DynamicColors;
@@ -41,6 +46,7 @@ public class RustInputMethodService extends InputMethodService {
     private View recordContainer;
     private android.widget.ImageView micIcon;
     private ProgressBar progressBar;
+    private View discardButton;
     private View backspaceButton;
     private View spaceButton;
     private View enterButton;
@@ -55,6 +61,9 @@ public class RustInputMethodService extends InputMethodService {
     private boolean isRecording = false;
     private boolean pendingSwitchBack = false;
     private String lastStatus = "Initializing...";
+    private volatile int streamGeneration = 0;
+    private boolean composingActive = false;
+    private int lastComposingLen = 0;
     // Key repeat settings
     private static final long REPEAT_INITIAL_DELAY = 400; // ms before repeat starts
     private static final long REPEAT_INTERVAL = 50; // ms between repeats
@@ -124,6 +133,10 @@ public class RustInputMethodService extends InputMethodService {
             micLevelView = view.findViewById(R.id.ime_mic_level);
             recordCircle = view.findViewById(R.id.ime_record_circle);
             hintView = view.findViewById(R.id.ime_hint);
+            discardButton = view.findViewById(R.id.ime_discard);
+            if (discardButton != null) {
+                discardButton.setOnClickListener(v -> onDiscardTapped());
+            }
             backspaceButton = view.findViewById(R.id.ime_backspace);
             spaceButton = view.findViewById(R.id.ime_space);
             enterButton = view.findViewById(R.id.ime_enter);
@@ -247,6 +260,9 @@ public class RustInputMethodService extends InputMethodService {
                     }
                     updateRecordButtonUI(false);
                 } else {
+                    streamGeneration++;
+                    composingActive = false;
+                    lastComposingLen = 0;
                     if (isPauseAudioEnabled()) {
                         audioPauser.request(this);
                         pauseAudioActive = true;
@@ -270,6 +286,7 @@ public class RustInputMethodService extends InputMethodService {
     @Override
     public void onWindowShown() {
         super.onWindowShown();
+        if (inputView != null) inputView.setKeepScreenOn(true);
         boolean wasVisible = windowVisible;
         windowVisible = true;
         if (isRecording) {
@@ -286,6 +303,9 @@ public class RustInputMethodService extends InputMethodService {
         if (new File(getFilesDir(), "auto_record").exists()) {
             if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
                     == PackageManager.PERMISSION_GRANTED) {
+                streamGeneration++;
+                composingActive = false;
+                lastComposingLen = 0;
                 if (isPauseAudioEnabled()) {
                     audioPauser.request(this);
                     pauseAudioActive = true;
@@ -300,9 +320,13 @@ public class RustInputMethodService extends InputMethodService {
     public void onWindowHidden() {
         super.onWindowHidden();
         windowVisible = false;
+        if (inputView != null) inputView.setKeepScreenOn(false);
         if (isRecording) {
+            streamGeneration++;
             if (isStopOnHideEnabled()) {
                 // Opt-in behavior: discard the recording when the keyboard hides.
+                composingActive = false;
+                lastComposingLen = 0;
                 try {
                     cancelRecording();
                 } catch (Throwable t) {
@@ -356,10 +380,11 @@ public class RustInputMethodService extends InputMethodService {
 
     private void updateRecordButtonUI(boolean recording) {
         isRecording = recording;
-        // Keep the screen awake while recording so it never sleeps mid-capture
-        // and cuts the recording short. Cleared automatically once we stop.
+        if (discardButton != null) {
+            discardButton.setVisibility(recording ? View.VISIBLE : View.GONE);
+        }
         if (inputView != null) {
-            inputView.setKeepScreenOn(recording);
+            inputView.setKeepScreenOn(recording || windowVisible);
         }
         tintRecordButton(recording);
         if (recording) {
@@ -370,6 +395,34 @@ public class RustInputMethodService extends InputMethodService {
             hintView.setText("Tap to Record");
             if (micLevelView != null) micLevelView.setLevel(0f);
         }
+    }
+
+    private void onDiscardTapped() {
+        if (!isRecording) return;
+        streamGeneration++;
+        InputConnection ic = getCurrentInputConnection();
+        if (ic != null && composingActive) {
+            ic.beginBatchEdit();
+            try {
+                ic.setComposingText("", 1);
+                ic.finishComposingText();
+            } finally {
+                ic.endBatchEdit();
+            }
+        }
+        composingActive = false;
+        lastComposingLen = 0;
+        try {
+            cancelRecording();
+        } catch (Throwable t) {
+            Log.e(TAG, "cancelRecording failed", t);
+        }
+        if (pauseAudioActive) {
+            audioPauser.abandon(this);
+            pauseAudioActive = false;
+        }
+        updateRecordButtonUI(false);
+        if (statusView != null) statusView.setText("Tap to Record");
     }
 
     /** Tints the round record button + mic: idle = primary, recording = error. */
@@ -467,49 +520,71 @@ public class RustInputMethodService extends InputMethodService {
 
     // Called from Rust during streaming dictation (R2T2, Parakeet)
     public void onPartialText(String committed, String tentative) {
+        final int gen = streamGeneration;
         mainHandler.post(() -> {
-            if (!inputActive) return;
+            if (gen != streamGeneration || !inputActive) return;
             InputConnection ic = getCurrentInputConnection();
-            if (ic != null) {
-                String full = (committed != null ? committed : "") + (tentative != null ? tentative : "");
-                if (!full.isEmpty()) {
-                    ic.setComposingText(full, 1);
-                }
+            if (ic == null) return;
+
+            String safeCommitted = committed != null ? committed : "";
+            String safeTentative = tentative != null ? tentative : "";
+            if (safeCommitted.isEmpty() && safeTentative.isEmpty()) return;
+
+            SpannableStringBuilder ssb = new SpannableStringBuilder();
+            ssb.append(safeCommitted);
+
+            if (!safeTentative.isEmpty()) {
+                int start = ssb.length();
+                ssb.append(safeTentative);
+                ssb.setSpan(new UnderlineSpan(), start, ssb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
+
+            ic.setComposingText(ssb, 1);
+            composingActive = true;
+            lastComposingLen = ssb.length();
         });
     }
 
     // Called from Rust
     public void onTextTranscribed(String text) {
+        final int gen = streamGeneration;
         mainHandler.post(() -> {
+            if (gen != streamGeneration) return;
             InputConnection ic = getCurrentInputConnection();
-            if (ic != null) {
-                ic.finishComposingText();
-            }
-            if (text == null || text.trim().isEmpty()) {
-                // Nothing recognized — don't insert a stray space.
-                updateRecordButtonUI(false);
-                if (statusView != null) statusView.setText("Tap to Record");
-                if (pauseAudioActive) {
-                    audioPauser.abandon(this);
-                    pauseAudioActive = false;
+
+            if (ic != null && composingActive) {
+                int hypothesisLen = lastComposingLen;
+                ic.beginBatchEdit();
+                try {
+                    ic.finishComposingText();
+                    ic.commitText(" ", 1);
+
+                    if (!pendingSwitchBack && isSelectTranscriptionEnabled()) {
+                        ExtractedText et = ic.getExtractedText(
+                                new ExtractedTextRequest(), 0);
+                        if (et != null) {
+                            int end = et.selectionStart;
+                            int start = end - (hypothesisLen + 1);
+                            if (start >= 0) {
+                                ic.setSelection(start, end);
+                            }
+                        }
+                    }
+                } finally {
+                    ic.endBatchEdit();
                 }
-                if (pendingSwitchBack) {
-                    pendingSwitchBack = false;
-                    switchToPreviousInputMethod();
+            } else if (text != null && !text.trim().isEmpty()) {
+                String committed = text + " ";
+                if (inputActive && ic != null) {
+                    commitTranscribedText(ic, committed);
+                } else {
+                    pendingCommitText = committed;
                 }
-                return;
             }
-            String committed = text + " ";
-            if (inputActive && ic != null) {
-                commitTranscribedText(ic, committed);
-            } else {
-                // No editor is focused right now (common on long transcribes where
-                // a web field in Firefox/Gemini dropped focus while we processed
-                // audio). Committing now would be silently dropped, so defer the
-                // text until a field is focused again instead of losing it.
-                pendingCommitText = committed;
-            }
+
+            composingActive = false;
+            lastComposingLen = 0;
+
             if (pauseAudioActive) {
                 audioPauser.abandon(this);
                 pauseAudioActive = false;
@@ -521,6 +596,10 @@ public class RustInputMethodService extends InputMethodService {
                 switchToPreviousInputMethod();
             }
         });
+    }
+
+    private boolean isSelectTranscriptionEnabled() {
+        return new File(getFilesDir(), "select_transcription").exists();
     }
 
     // Commits transcribed text into the active input connection, optionally

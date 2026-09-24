@@ -58,6 +58,7 @@ struct Endpoint {
     started_at: Instant,
     jvm: Arc<jni::JavaVM>,
     target: GlobalRef,
+    audio_tx: Mutex<Option<crossbeam_channel::Sender<Vec<f32>>>>,
 }
 
 struct Session {
@@ -79,6 +80,17 @@ fn call_rms(env: &mut JNIEnv, obj: &JObject, rms_db: f32) {
 
 fn call_error(env: &mut JNIEnv, obj: &JObject, code: i32) {
     let _ = env.call_method(obj, "onError", "(I)V", &[code.into()]);
+}
+
+fn call_partial_results(env: &mut JNIEnv, obj: &JObject, committed: &str, tentative: &str) {
+    if let (Ok(jcom), Ok(jten)) = (env.new_string(committed), env.new_string(tentative)) {
+        let _ = env.call_method(
+            obj,
+            "onPartialResults",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            &[(&jcom).into(), (&jten).into()],
+        );
+    }
 }
 
 fn call_results(env: &mut JNIEnv, obj: &JObject, text: &str) {
@@ -145,9 +157,30 @@ pub unsafe extern "system" fn Java_dev_notune_transcribe_VoiceRecognitionService
         if let Some(old) = guard.take() {
             old.shared.cancelled.store(true, Ordering::SeqCst);
             old.shared.finalized.store(true, Ordering::SeqCst);
+            *old.shared.audio_tx.lock().unwrap() = None;
             *old.stream.lock().unwrap() = None;
         }
     }
+
+    let (supports_streaming, is_r2t2, r2t2_cadence, lang, task) = if let Some(eng_arc) = engine::get_engine() {
+        let guard = eng_arc.lock().unwrap_or_else(|e| e.into_inner());
+        (
+            guard.supports_streaming(),
+            guard.is_r2t2(),
+            guard.r2t2_cadence_ms,
+            guard.language.clone(),
+            guard.task,
+        )
+    } else {
+        (false, false, 320, None, transcribe_cpp::Task::Transcribe)
+    };
+
+    let (tx_opt, rx_opt) = if supports_streaming {
+        let (tx, rx) = crossbeam_channel::bounded::<Vec<f32>>(256);
+        (Some(tx), Some(rx))
+    } else {
+        (None, None)
+    };
 
     let now = Instant::now();
     let shared = Arc::new(Endpoint {
@@ -161,6 +194,7 @@ pub unsafe extern "system" fn Java_dev_notune_transcribe_VoiceRecognitionService
         started_at: now,
         jvm: jvm.clone(),
         target,
+        audio_tx: Mutex::new(tx_opt),
     });
     let stream_holder: Arc<Mutex<Option<SendStream>>> = Arc::new(Mutex::new(None));
 
@@ -215,6 +249,21 @@ pub unsafe extern "system" fn Java_dev_notune_transcribe_VoiceRecognitionService
     let mon_stream = stream_holder.clone();
     std::thread::spawn(move || endpoint_monitor(mon_shared, mon_stream));
 
+    // If streaming model is loaded, spawn streaming consumer worker
+    if let Some(rx) = rx_opt {
+        let stream_worker_shared = shared.clone();
+        std::thread::spawn(move || {
+            run_streaming_worker(
+                stream_worker_shared,
+                rx,
+                is_r2t2,
+                r2t2_cadence,
+                lang,
+                task,
+            );
+        });
+    }
+
     *SESSION.lock().unwrap() = Some(Session {
         shared,
         stream: stream_holder,
@@ -244,6 +293,7 @@ pub unsafe extern "system" fn Java_dev_notune_transcribe_VoiceRecognitionService
     if let Some(session) = guard.as_ref() {
         session.shared.cancelled.store(true, Ordering::SeqCst);
         session.shared.finalized.store(true, Ordering::SeqCst);
+        *session.shared.audio_tx.lock().unwrap() = None;
         *session.stream.lock().unwrap() = None;
     }
     *guard = None;
@@ -266,6 +316,9 @@ fn audio_callback(shared: &Arc<Endpoint>, data: &[f32]) {
     }
 
     shared.audio_buffer.lock().unwrap().extend_from_slice(data);
+    if let Some(tx) = &*shared.audio_tx.lock().unwrap() {
+        let _ = tx.try_send(data.to_vec());
+    }
 
     // RMS -> smoothed level in 0..1 (same scaling as voice_session).
     let mut sum = 0.0f32;
@@ -296,13 +349,18 @@ fn audio_callback(shared: &Arc<Endpoint>, data: &[f32]) {
         *nf = *nf * 0.95 + level * 0.05;
     }
 
-    // Throttled mic-level updates for the keyboard's waveform UI.
+    // Throttled mic-level updates for the keyboard's waveform UI in dB.
     let mut last = shared.last_level_sent.lock().unwrap();
     if last.elapsed() >= Duration::from_millis(LEVEL_UPDATE_MS) {
         *last = Instant::now();
         drop(last);
+        let rms_db = if rms <= 0.0001 {
+            -80.0
+        } else {
+            (20.0 * rms.log10()).clamp(-80.0, 0.0)
+        };
         if let Ok(mut env) = shared.jvm.attach_current_thread() {
-            call_rms(&mut env, shared.target.as_obj(), level * 10.0);
+            call_rms(&mut env, shared.target.as_obj(), rms_db);
         }
     }
 }
@@ -344,18 +402,27 @@ fn finalize(shared: Arc<Endpoint>, stream: Arc<Mutex<Option<SendStream>>>) {
     // Stop the microphone (also drops the audio callback's Arc<Endpoint>).
     *stream.lock().unwrap() = None;
 
-    let buffer = shared.audio_buffer.lock().unwrap().clone();
     let speech = shared.speech_started.load(Ordering::SeqCst);
 
+    if let Ok(mut env) = shared.jvm.attach_current_thread() {
+        let target = shared.target.as_obj();
+        if speech {
+            call_void(&mut env, target, "onEndOfSpeech");
+        }
+    }
+
+    // If streaming was active, dropping audio_tx signals the streaming worker to finalize
+    let was_streaming = shared.audio_tx.lock().unwrap().take().is_some();
+    if was_streaming {
+        return;
+    }
+
+    let buffer = shared.audio_buffer.lock().unwrap().clone();
     let mut env = match shared.jvm.attach_current_thread() {
         Ok(e) => e,
         Err(_) => return,
     };
     let target = shared.target.as_obj();
-
-    if speech {
-        call_void(&mut env, target, "onEndOfSpeech");
-    }
 
     // ~0.2s minimum of audio to bother transcribing.
     if buffer.len() < 3200 {
@@ -385,6 +452,149 @@ fn finalize(shared: Arc<Endpoint>, stream: Arc<Mutex<Option<SendStream>>>) {
             }
         }
         None => call_error(&mut env, target, ERROR_SERVER),
+    }
+
+    clear_session(&shared);
+}
+
+fn run_streaming_worker(
+    shared: Arc<Endpoint>,
+    rx: crossbeam_channel::Receiver<Vec<f32>>,
+    is_r2t2: bool,
+    r2t2_cadence: u32,
+    lang: Option<String>,
+    task: transcribe_cpp::Task,
+) {
+    let eng_arc = match engine::get_engine() {
+        Some(e) => e,
+        None => return,
+    };
+
+    let mut session = {
+        let guard = eng_arc.lock().unwrap_or_else(|e| e.into_inner());
+        match guard.stream_session() {
+            Ok(s) => s,
+            Err(e) => {
+                log::error!("RecognitionService stream session failed: {}", e);
+                return;
+            }
+        }
+    };
+
+    let stream_opts = transcribe_cpp::StreamOptions {
+        commit_policy: transcribe_cpp::CommitPolicy::Auto,
+        family: if is_r2t2 {
+            Some(transcribe_cpp::StreamExtension::R2T2(
+                transcribe_cpp::R2T2StreamOptions {
+                    chunk_size_ms: Some(r2t2_cadence),
+                },
+            ))
+        } else {
+            Some(transcribe_cpp::StreamExtension::ParakeetStream(
+                transcribe_cpp::ParakeetStreamOptions {
+                    att_context_right: Some(1),
+                },
+            ))
+        },
+        enable_vad: true,
+        vad_threshold: 0.50,
+        ..Default::default()
+    };
+
+    let run_opts = transcribe_cpp::RunOptions {
+        language: lang,
+        task,
+        ..Default::default()
+    };
+
+    let mut stream = match session.stream(&run_opts, &stream_opts) {
+        Ok(s) => s,
+        Err(e) => {
+            log::error!("RecognitionService failed to start stream: {}", e);
+            return;
+        }
+    };
+
+    // 200 ms silent warmup pass
+    let _ = stream.feed(&vec![0.0f32; 3200]);
+
+    const FEED_CHUNK_SAMPLES: usize = 1600; // 100 ms
+    const BACKLOG_TRIM_SAMPLES: usize = 48000; // 3.0 s
+    const BACKLOG_KEEP_TAIL_SAMPLES: usize = 16000; // 1.0 s
+    let mut pcm_buf: Vec<f32> = Vec::with_capacity(FEED_CHUNK_SAMPLES * 4);
+
+    while let Ok(chunk) = rx.recv() {
+        if shared.cancelled.load(Ordering::SeqCst) {
+            stream.reset();
+            return;
+        }
+
+        pcm_buf.extend_from_slice(&chunk);
+
+        if pcm_buf.len() > BACKLOG_TRIM_SAMPLES {
+            let dropped = pcm_buf.len() - BACKLOG_KEEP_TAIL_SAMPLES;
+            pcm_buf.drain(..dropped);
+        }
+
+        while pcm_buf.len() >= FEED_CHUNK_SAMPLES {
+            let feed_slice: Vec<f32> = pcm_buf.drain(..FEED_CHUNK_SAMPLES).collect();
+            match stream.feed(&feed_slice) {
+                Ok(update) => {
+                    if update.committed_changed || update.tentative_changed {
+                        let text = stream.text();
+                        if !shared.cancelled.load(Ordering::SeqCst) {
+                            if let Ok(mut env) = shared.jvm.attach_current_thread() {
+                                call_partial_results(
+                                    &mut env,
+                                    shared.target.as_obj(),
+                                    &text.committed,
+                                    &text.tentative,
+                                );
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Stream feed error in RecognitionService: {}", e);
+                    break;
+                }
+            }
+        }
+    }
+
+    // Audio sender closed (stopListening or silence endpointing)
+    if shared.cancelled.load(Ordering::SeqCst) {
+        stream.reset();
+        return;
+    }
+
+    if !pcm_buf.is_empty() {
+        let _ = stream.feed(&pcm_buf);
+    }
+
+    match stream.finalize() {
+        Ok(_) => {
+            let text = stream.text();
+            let final_text = text.display();
+            if !shared.cancelled.load(Ordering::SeqCst) {
+                if let Ok(mut env) = shared.jvm.attach_current_thread() {
+                    let target = shared.target.as_obj();
+                    if !final_text.trim().is_empty() {
+                        call_results(&mut env, target, &final_text);
+                    } else {
+                        call_error(&mut env, target, ERROR_NO_MATCH);
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            log::error!("Stream finalize error in RecognitionService: {}", e);
+            if !shared.cancelled.load(Ordering::SeqCst) {
+                if let Ok(mut env) = shared.jvm.attach_current_thread() {
+                    call_error(&mut env, shared.target.as_obj(), ERROR_SERVER);
+                }
+            }
+        }
     }
 
     clear_session(&shared);
