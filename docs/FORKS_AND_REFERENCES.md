@@ -16,13 +16,13 @@ This document catalogs the upstream forks, comparison URLs, and reference reposi
 | **Nicfox77** | [Compare with upstream main](https://github.com/notune/android_transcribe_app/compare/main...Nicfox77:android_transcribe_app:main) | Inspectable streaming IME builds, self-reporting CI workflows, and PR verification builds. |
 | **arthow4n** | [Compare with upstream main](https://github.com/notune/android_transcribe_app/compare/main...arthow4n:android_transcribe_app:main) | Traditional Chinese language conversion (Taiwan); keyboard streaming dictation with live speed/WPM stats; configurable filler word filter and punctuation cleanup; buffered streaming dictation with Parakeet Unified EN; model memory per language. |
 | **space-shell (nemotron-voice-input)** | [Compare with upstream main](https://github.com/notune/android_transcribe_app/compare/main...space-shell:nemotron-voice-input:main) | Migration to `transcribe-cpp 0.2.3`; per-run `Session` architecture with lock-free channel audio feeding; floating keyboard mode with insets fix; microphone foreground service (FGS) for background recording; survival of freezer cold-restarts; FFI hardening (`catch_unwind`, no aborts on JNI error, `SendStream`). |
-| **djurcola (futo-voice-bridge)** | [Compare with upstream main](https://github.com/notune/android_transcribe_app/compare/main...djurcola:android_transcribe_app:agent/futo-voice-bridge) | Authenticated AIDL Binder bridge for FUTO Keyboard integration; floating voice bubble overlay (`BubbleService`); non-intrusive direct text insertion via accessibility (`InsertionAccessibilityService`); custom vocabulary prompt biasing for Whisper models (`CustomWordsPrefs`); persistent SQLite transcription history (`TranscriptionHistory`). |
+| **djurcola (stable-test-signing)** | [Compare with upstream main](https://github.com/notune/android_transcribe_app/compare/main...djurcola:android_transcribe_app:agent/stable-test-signing) | Production-hardened FUTO Keyboard voice bridge on branch [`agent/stable-test-signing`](https://github.com/djurcola/android_transcribe_app/tree/agent/stable-test-signing). Adds Android 14 foreground activation dispatching (`ForegroundActivationActivity` + nonce validation), native CPAL audio context bootstrapping (`NativeContextBootstrap`), dynamic sample rate / channel format negotiation with continuous linear resampling (`CaptureConverter`), floating voice bubble overlay (`BubbleService`), accessibility direct text insertion (`InsertionAccessibilityService`), Whisper vocabulary prompt biasing (`CustomWordsPrefs`), SQLite transcription history (`TranscriptionHistory`), and CI shared test keystore signing. |
 
 ---
 
 ## 2. Deep Dive: FUTO Voice Bridge & Universal Dictation Architecture (djurcola)
 
-The `djurcola/android_transcribe_app` fork (`agent/futo-voice-bridge`) introduces a comprehensive architectural suite designed to solve two core challenges in mobile offline voice dictation:
+The `djurcola/android_transcribe_app` fork (branch [`agent/stable-test-signing`](https://github.com/djurcola/android_transcribe_app/tree/agent/stable-test-signing), evolved from `agent/futo-voice-bridge`) introduces a comprehensive architectural suite designed to solve two core challenges in mobile offline voice dictation:
 1. **FUTO Keyboard Integration Without Vendor Lock-In**: FUTO Keyboard provides built-in voice input, but bundles its own proprietary or nagware-licensed Whisper models. Users who prefer open-source GGUF/transcribe.cpp models (Whisper, Moonshine, Parakeet, R2T2) previously had to cycle through the Android IME switcher away from FUTO Keyboard.
 2. **Universal Dictation Across Any App/Keyboard**: Rather than requiring every keyboard to support a specific voice protocol, an independent floating bubble can capture speech and paste it safely into whatever input field is focused.
 
@@ -34,10 +34,13 @@ The bridge exposes an on-demand, authenticated Binder IPC service (`dev.notune.t
 // IOfflineVoiceBridge.aidl
 package dev.notune.transcribe;
 
+import android.app.PendingIntent;
 import dev.notune.transcribe.IOfflineVoiceBridgeCallback;
 
 interface IOfflineVoiceBridge {
     String pair();
+    PendingIntent requestForegroundStart(String capability);
+    boolean isForegroundReady(String capability);
     void start(String capability, IOfflineVoiceBridgeCallback callback);
     void stop(String capability);
     void cancel(String capability);
@@ -68,31 +71,47 @@ To prevent arbitrary third-party apps from hijacking the microphone or reading t
   - When approved by the user inside FUTO Keyboard's UI, `PAIRING_ACCEPTED` is returned, and both sides persist the capability.
   - Alternatively, FUTO Keyboard can invoke `pair()` directly over Binder if its calling UID matches the pinned package.
 
-### 2.3 Resilient Microphone & Native Lifecycle
+### 2.3 Resilient Microphone, Android 14 Foreground Elevation & Native Lifecycle
 
-- **Foreground Service Enforcement**: When `start()` is invoked, `OfflineVoiceBridgeService` immediately elevates to a foreground service with `ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE`. This satisfies Android 10+ and 14+ background microphone capture restrictions.
+- **Android 14 Foreground Microphone Eligibility Trampoline**:
+  - On Android 14+ (API 34), a background process cannot start a foreground service with `FOREGROUND_SERVICE_TYPE_MICROPHONE` without having a visible activity or caller foreground delegation (`ForegroundServiceStartNotAllowedException`).
+  - `OfflineVoiceBridgeService` solves this via `requestForegroundStart(capability)`: it generates a cryptographically random 32-byte nonce (with a time-to-live) and packages it into a `PendingIntent` pointing to a transparent 1-shot activity (`ForegroundActivationActivity`).
+  - FUTO Keyboard (which has foreground privilege while the keyboard is displayed) executes the `PendingIntent`. In `onPostResume()`, `ForegroundActivationDispatcher` dispatches `ACTION_FOREGROUND_START` with the nonce to the bridge service and finishes itself immediately without flickering.
+  - This guarantees legitimate, crash-free microphone elevation across all Android versions.
+- **Native Context Bootstrap (`NativeContextBootstrap.java` & `src/android_context.rs`)**:
+  - Initializes Android runtime context in native Rust via `ndk_context::initialize_android_context(vm, application_context)`. This is essential for CPAL / AAudio / AudioRecord to function reliably when invoked outside the main activity.
+- **Dynamic Capture Format Negotiation & Stateful Resampling (`src/audio.rs`)**:
+  - Instead of hardcoding 16 kHz mono capture (which fails or degrades on devices with fixed 44.1 kHz/48 kHz hardware pipelines), `select_input_format` queries `device.supported_input_configs()`, clamps to the supported hardware rates, and uses `CaptureConverter` for continuous linear resampling and downmixing to 16 kHz.
 - **Death Recipient Binding**: Attaches `callbackBinder.linkToDeath(...)`. If FUTO Keyboard crashes, is killed by LMK, or unbinds, the bridge immediately cancels recording, stops audio capture, removes the foreground notification, and unloads native state.
 - **Session Watchdog**: A strict 60-second timer (`MAX_SESSION_MS = 60_000L`) automatically aborts stuck sessions to prevent battery drain.
 - **Isolated Native Bridge State (`src/bridge.rs`)**: Maintains its own static `BRIDGE_STATE: Mutex<Option<VoiceSessionState>>`, completely decoupled from the IME and dialog popup lifecycles.
+- **Shared Test Keystore Signing**: The `agent/stable-test-signing` branch adds automated test artifact signing in CI so test builds can be upgraded seamlessly without uninstalling.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant FUTO as FUTO Keyboard
+    participant FUTO as FUTO Keyboard (Visible IME)
+    participant Act as ForegroundActivationActivity
     participant Bridge as OfflineVoiceBridgeService
-    participant Native as Rust Native Engine (bridge.rs)
-    participant Mic as Android AudioRecord
+    participant Native as Rust Native Engine (bridge.rs + audio.rs)
+    participant Mic as Android Hardware Audio
 
-    Note over FUTO,Bridge: Initial One-Time Pairing Handshake
+    Note over FUTO,Bridge: 1. One-Time Cryptographic Handshake
     FUTO->>Bridge: pair() or Activity Consent Intent
-    Bridge-->>FUTO: Return 256-bit Capability Token
+    Bridge-->>FUTO: Return 256-bit Base64 Capability Token
 
-    Note over FUTO,Mic: On-Demand Voice Typing Flow
-    FUTO->>Bridge: start(capability, callback)
-    Bridge->>Bridge: Verify Calling UID & Constant-Time Token Match
+    Note over FUTO,Bridge: 2. Android 14 Foreground Elevation
+    FUTO->>Bridge: requestForegroundStart(capability)
+    Bridge-->>FUTO: Return PendingIntent(ForegroundActivationActivity + Nonce)
+    FUTO->>Act: launch PendingIntent
+    Act->>Bridge: startForegroundService(ACTION_FOREGROUND_START + Nonce)
     Bridge->>Bridge: startForeground(FOREGROUND_SERVICE_TYPE_MICROPHONE)
+    Act->>Act: finish() (immediate)
+
+    Note over FUTO,Mic: 3. On-Demand Voice Typing Session
+    FUTO->>Bridge: start(capability, callback)
     Bridge->>Native: initNative() & startRecordingNative()
-    Native->>Mic: Open & Read Audio Buffer
+    Native->>Mic: Open Native Format & Stream to CaptureConverter
     Bridge-->>FUTO: callback.onState(STATE_LISTENING)
 
     FUTO->>Bridge: stop(capability)
