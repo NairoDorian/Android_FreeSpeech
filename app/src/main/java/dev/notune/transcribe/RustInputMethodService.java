@@ -552,34 +552,33 @@ public class RustInputMethodService extends InputMethodService {
             if (gen != streamGeneration) return;
             InputConnection ic = getCurrentInputConnection();
 
-            if (ic != null && composingActive) {
-                int hypothesisLen = lastComposingLen;
+            if (ic != null) {
                 ic.beginBatchEdit();
                 try {
-                    ic.finishComposingText();
-                    ic.commitText(" ", 1);
-
-                    if (!pendingSwitchBack && isSelectTranscriptionEnabled()) {
-                        ExtractedText et = ic.getExtractedText(
-                                new ExtractedTextRequest(), 0);
-                        if (et != null) {
-                            int end = et.selectionStart;
-                            int start = end - (hypothesisLen + 1);
-                            if (start >= 0) {
-                                ic.setSelection(start, end);
+                    if (text != null && !text.trim().isEmpty()) {
+                        String committed = text.trim() + " ";
+                        if (inputActive) {
+                            if (composingActive) {
+                                ic.setComposingText("", 1);
+                                ic.finishComposingText();
                             }
+                            commitTranscribedText(ic, committed);
+                        } else {
+                            if (composingActive) {
+                                ic.setComposingText("", 1);
+                                ic.finishComposingText();
+                            }
+                            pendingCommitText = committed;
                         }
+                    } else if (composingActive) {
+                        ic.setComposingText("", 1);
+                        ic.finishComposingText();
                     }
                 } finally {
                     ic.endBatchEdit();
                 }
             } else if (text != null && !text.trim().isEmpty()) {
-                String committed = text + " ";
-                if (inputActive && ic != null) {
-                    commitTranscribedText(ic, committed);
-                } else {
-                    pendingCommitText = committed;
-                }
+                pendingCommitText = text.trim() + " ";
             }
 
             composingActive = false;

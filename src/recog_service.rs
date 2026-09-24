@@ -496,21 +496,53 @@ fn run_streaming_worker(
                 },
             ))
         },
-        enable_vad: true,
+        enable_vad: !is_r2t2,
         vad_threshold: 0.50,
         ..Default::default()
     };
 
-    let run_opts = transcribe_cpp::RunOptions {
-        language: lang,
-        task,
-        ..Default::default()
+    let mut cur_lang = if is_r2t2 {
+        lang.as_deref().map(|l| l.split('-').next().unwrap_or(l).to_string())
+    } else {
+        lang.clone()
     };
 
-    let mut stream = match session.stream(&run_opts, &stream_opts) {
+    let stream_res = loop {
+        let run_opts = transcribe_cpp::RunOptions {
+            language: cur_lang.clone(),
+            task,
+            ..Default::default()
+        };
+        match session.stream(&run_opts, &stream_opts) {
+            Ok(s) => break Ok(s),
+            Err(transcribe_cpp::Error::Unsupported(msg)) if cur_lang.is_some() => {
+                let old_lang = cur_lang.take().unwrap();
+                cur_lang = old_lang.split_once('-').map(|(primary, _)| primary.to_string());
+                log::warn!(
+                    "RecognitionService stream language '{}' rejected ({}); retrying with {:?}",
+                    old_lang,
+                    msg,
+                    cur_lang
+                );
+            }
+            Err(e) => {
+                log::error!("RecognitionService failed to start stream: {}", e);
+                break Err(e);
+            }
+        }
+    };
+
+    let mut stream = match stream_res {
         Ok(s) => s,
-        Err(e) => {
-            log::error!("RecognitionService failed to start stream: {}", e);
+        Err(_) => {
+            log::warn!("RecognitionService streaming failed to start; falling back to batch");
+            while let Ok(_) = rx.recv() {
+                if shared.cancelled.load(Ordering::SeqCst) {
+                    clear_session(&shared);
+                    return;
+                }
+            }
+            run_batch_fallback(&shared, &eng_arc);
             return;
         }
     };
@@ -572,32 +604,66 @@ fn run_streaming_worker(
         let _ = stream.feed(&pcm_buf);
     }
 
-    match stream.finalize() {
-        Ok(_) => {
-            let text = stream.text();
-            let final_text = text.display();
-            if !shared.cancelled.load(Ordering::SeqCst) {
-                if let Ok(mut env) = shared.jvm.attach_current_thread() {
-                    let target = shared.target.as_obj();
-                    if !final_text.trim().is_empty() {
-                        call_results(&mut env, target, &final_text);
-                    } else {
-                        call_error(&mut env, target, ERROR_NO_MATCH);
-                    }
-                }
-            }
-        }
+    let stream_text = match stream.finalize() {
+        Ok(_) => stream.text().display(),
         Err(e) => {
             log::error!("Stream finalize error in RecognitionService: {}", e);
-            if !shared.cancelled.load(Ordering::SeqCst) {
+            String::new()
+        }
+    };
+
+    if !shared.cancelled.load(Ordering::SeqCst) {
+        if !stream_text.trim().is_empty() {
+            if let Ok(mut env) = shared.jvm.attach_current_thread() {
+                call_results(&mut env, shared.target.as_obj(), &stream_text);
+            }
+        } else {
+            let buffer = shared.audio_buffer.lock().unwrap().clone();
+            if buffer.len() >= 3200 {
+                log::info!("RecognitionService stream produced empty text; trying batch fallback");
+                run_batch_fallback(&shared, &eng_arc);
+                return;
+            } else {
                 if let Ok(mut env) = shared.jvm.attach_current_thread() {
-                    call_error(&mut env, shared.target.as_obj(), ERROR_SERVER);
+                    call_error(&mut env, shared.target.as_obj(), ERROR_NO_MATCH);
                 }
             }
         }
     }
 
     clear_session(&shared);
+}
+
+fn run_batch_fallback(shared: &Arc<Endpoint>, eng_arc: &Arc<Mutex<engine::Engine>>) {
+    if shared.cancelled.load(Ordering::SeqCst) {
+        clear_session(shared);
+        return;
+    }
+    let buffer = shared.audio_buffer.lock().unwrap().clone();
+    let mut env = match shared.jvm.attach_current_thread() {
+        Ok(e) => e,
+        Err(_) => {
+            clear_session(shared);
+            return;
+        }
+    };
+    let target = shared.target.as_obj();
+    if buffer.len() < 3200 {
+        call_error(&mut env, target, ERROR_NO_MATCH);
+        clear_session(shared);
+        return;
+    }
+
+    let res = engine::transcribe_shared(eng_arc, buffer);
+    match res {
+        Ok(text) if !text.trim().is_empty() => call_results(&mut env, target, &text),
+        Ok(_) => call_error(&mut env, target, ERROR_NO_MATCH),
+        Err(e) => {
+            log::error!("RecognitionService batch fallback failed: {}", e);
+            call_error(&mut env, target, ERROR_SERVER);
+        }
+    }
+    clear_session(shared);
 }
 
 /// Clear the global session, but only if it is still *this* session — a newer

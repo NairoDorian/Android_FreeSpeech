@@ -243,23 +243,45 @@ fn run_streaming_subtitle_worker(
                     },
                 ))
             },
-            enable_vad: true,
+            enable_vad: !is_r2t2,
             vad_threshold: 0.50,
             ..Default::default()
         };
 
-        let run_opts = transcribe_cpp::RunOptions {
-            language: lang,
-            task,
-            ..Default::default()
+        let mut cur_lang = if is_r2t2 {
+            lang.as_deref().map(|l| l.split('-').next().unwrap_or(l).to_string())
+        } else {
+            lang.clone()
         };
 
-        let mut stream = match session.stream(&run_opts, &stream_opts) {
-            Ok(s) => s,
-            Err(e) => {
-                log::error!("Failed to create subtitle stream: {}", e);
-                return;
+        let stream_res = loop {
+            let run_opts = transcribe_cpp::RunOptions {
+                language: cur_lang.clone(),
+                task,
+                ..Default::default()
+            };
+            match session.stream(&run_opts, &stream_opts) {
+                Ok(s) => break Ok(s),
+                Err(transcribe_cpp::Error::Unsupported(msg)) if cur_lang.is_some() => {
+                    let old_lang = cur_lang.take().unwrap();
+                    cur_lang = old_lang.split_once('-').map(|(primary, _)| primary.to_string());
+                    log::warn!(
+                        "LiveSubtitle stream language '{}' rejected ({}); retrying with {:?}",
+                        old_lang,
+                        msg,
+                        cur_lang
+                    );
+                }
+                Err(e) => {
+                    log::error!("Failed to create subtitle stream: {}", e);
+                    break Err(e);
+                }
             }
+        };
+
+        let mut stream = match stream_res {
+            Ok(s) => s,
+            Err(_) => return,
         };
 
         // 200 ms silent warmup

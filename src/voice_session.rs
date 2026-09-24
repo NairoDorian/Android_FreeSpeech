@@ -362,24 +362,52 @@ fn run_inference_consumer(
                     },
                 ))
             },
-            enable_vad: true,
+            enable_vad: !is_r2t2,
             vad_threshold: 0.50,
             ..Default::default()
         };
 
-        let run_opts = transcribe_cpp::RunOptions {
-            language: lang,
-            task,
-            ..Default::default()
+        let mut cur_lang = if is_r2t2 {
+            lang.as_deref().map(|l| l.split('-').next().unwrap_or(l).to_string())
+        } else {
+            lang.clone()
         };
 
-        let mut stream = match session.stream(&run_opts, &stream_opts) {
-            Ok(s) => s,
-            Err(e) => {
-                log::error!("Failed to begin stream: {}", e);
-                if is_current() {
-                    notify_status(&mut env, target, &format!("Error: {}", e));
+        let stream_res = loop {
+            let run_opts = transcribe_cpp::RunOptions {
+                language: cur_lang.clone(),
+                task,
+                ..Default::default()
+            };
+            match session.stream(&run_opts, &stream_opts) {
+                Ok(s) => break Ok(s),
+                Err(transcribe_cpp::Error::Unsupported(msg)) if cur_lang.is_some() => {
+                    let old_lang = cur_lang.take().unwrap();
+                    cur_lang = old_lang.split_once('-').map(|(primary, _)| primary.to_string());
+                    log::warn!(
+                        "Stream language '{}' rejected ({}); retrying with {:?}",
+                        old_lang,
+                        msg,
+                        cur_lang
+                    );
                 }
+                Err(e) => {
+                    log::error!("Failed to begin stream: {}", e);
+                    break Err(e);
+                }
+            }
+        };
+
+        let mut stream = match stream_res {
+            Ok(s) => s,
+            Err(_) => {
+                log::warn!("Streaming session creation failed; falling back to offline batch mode");
+                while let Ok(_) = rx.recv() {
+                    if !is_current() {
+                        return;
+                    }
+                }
+                run_batch_inference(&mut env, target, &eng_arc, &audio_buffer, is_current);
                 return;
             }
         };
@@ -443,20 +471,32 @@ fn run_inference_consumer(
             let _ = stream.feed(&pcm_buf);
         }
 
-        match stream.finalize() {
-            Ok(_) => {
-                let text = stream.text();
-                let final_text = text.display();
-                if is_current() {
-                    notify_status(&mut env, target, "Ready");
-                    notify_text(&mut env, target, &final_text);
-                }
-            }
+        let stream_text = match stream.finalize() {
+            Ok(_) => stream.text().display(),
             Err(e) => {
-                log::error!("Stream finalize error: {}", e);
-                if is_current() {
-                    notify_status(&mut env, target, &format!("Error: {}", e));
-                }
+                log::warn!("Stream finalize failed: {}", e);
+                String::new()
+            }
+        };
+
+        if !is_current() {
+            return;
+        }
+
+        if !stream_text.trim().is_empty() {
+            notify_status(&mut env, target, "Ready");
+            notify_text(&mut env, target, &stream_text);
+        } else {
+            let buffer = audio_buffer.lock().unwrap().clone();
+            if buffer.len() >= 3200 {
+                log::info!(
+                    "Streaming finalized with empty text; running batch fallback on {} samples",
+                    buffer.len()
+                );
+                run_batch_inference(&mut env, target, &eng_arc, &audio_buffer, is_current);
+            } else {
+                notify_status(&mut env, target, "Ready");
+                notify_text(&mut env, target, "");
             }
         }
     } else {
@@ -467,32 +507,41 @@ fn run_inference_consumer(
             }
         }
 
-        if !is_current() {
-            return;
-        }
+        run_batch_inference(&mut env, target, &eng_arc, &audio_buffer, is_current);
+    }
+}
 
-        let buffer = audio_buffer.lock().unwrap().clone();
-        if buffer.len() < 3200 {
-            if is_current() {
-                notify_status(&mut env, target, "Ready");
-                notify_text(&mut env, target, "");
-            }
-            return;
-        }
-
+fn run_batch_inference<F: Fn() -> bool>(
+    env: &mut JNIEnv,
+    target: &JObject,
+    eng_arc: &Arc<Mutex<engine::Engine>>,
+    audio_buffer: &Arc<Mutex<Vec<f32>>>,
+    is_current: F,
+) {
+    if !is_current() {
+        return;
+    }
+    let buffer = audio_buffer.lock().unwrap().clone();
+    if buffer.len() < 3200 {
         if is_current() {
-            notify_status(&mut env, target, "Transcribing...");
+            notify_status(env, target, "Ready");
+            notify_text(env, target, "");
         }
+        return;
+    }
 
-        let res = engine::transcribe_shared(&eng_arc, buffer);
-        if is_current() {
-            match res {
-                Ok(text) => {
-                    notify_status(&mut env, target, "Ready");
-                    notify_text(&mut env, target, &text);
-                }
-                Err(e) => notify_status(&mut env, target, &format!("Error: {}", e)),
+    if is_current() {
+        notify_status(env, target, "Transcribing...");
+    }
+
+    let res = engine::transcribe_shared(eng_arc, buffer);
+    if is_current() {
+        match res {
+            Ok(text) => {
+                notify_status(env, target, "Ready");
+                notify_text(env, target, &text);
             }
+            Err(e) => notify_status(env, target, &format!("Error: {}", e)),
         }
     }
 }

@@ -125,6 +125,21 @@ impl Engine {
             n_threads: threads,
             ..Default::default()
         };
+        let is_r2t2 = model.accepts_ext(
+            transcribe_cpp::ExtSlot::Stream,
+            transcribe_cpp::sys::TRANSCRIBE_EXT_KIND_R2T2_STREAM,
+        );
+        let mut language = language;
+        if is_r2t2 {
+            if let Some(ref l) = language {
+                if l.contains('-') {
+                    let primary = l.split('-').next().unwrap_or(l).to_string();
+                    log::info!("Normalizing R2T2 language '{}' -> '{}'", l, primary);
+                    language = Some(primary);
+                }
+            }
+        }
+
         let session = model.session_with(&session_options).map_err(|e| e.to_string())?;
         Ok(Engine {
             model,
