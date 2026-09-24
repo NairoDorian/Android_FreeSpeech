@@ -93,7 +93,7 @@ public class ModelsActivity extends AppCompatActivity {
             new ModelLink("Whisper Large-v3-Turbo", R.string.model_desc_whisper_turbo, "845 MB",
                     "https://huggingface.co/handy-computer/whisper-large-v3-turbo-gguf/resolve/main/whisper-large-v3-turbo-Q8_0.gguf"),
             new ModelLink("Confucius4-R2T2 (Arm M)", R.string.model_desc_r2t2, "1.18 GB",
-                    "https://huggingface.co/handy-computer/Confucius4-R2T2-gguf/resolve/main/r2t2-q4_k_m.gguf"),
+                    "https://huggingface.co/Nairod785/Confucius4-R2T2-Q4_K_M-GGUF/resolve/main/r2t2-q4_k_m.gguf"),
             new ModelLink("huggingface.co/handy-computer", R.string.model_desc_browse, "",
                     "https://huggingface.co/handy-computer"),
     };
