@@ -29,8 +29,11 @@ const MODEL_TRANSLATE_FILE: &str = "model_translate";
 /// Optional file in filesDir with the CPU thread count for inference.
 /// Absent/invalid/0 = default (all cores).
 const MODEL_THREADS_FILE: &str = "model_threads";
+/// Optional file in filesDir with the streaming latency in ms.
+/// Absent/empty = default (model recommended).
+const MODEL_STREAMING_LATENCY_FILE: &str = "model_streaming_latency";
 /// Optional file in filesDir with the R2T2 native streaming chunk cadence in ms [80, 2000].
-/// Absent/invalid/0 = default 320 ms.
+/// Absent/invalid/0 = default 320 ms. Kept for backward compatibility.
 const MODEL_R2T2_CADENCE_FILE: &str = "model_r2t2_cadence";
 
 /// Longest audio passed to the model in one run (60 s). Offline conformer
@@ -57,6 +60,8 @@ pub struct Engine {
     pub ready_status: &'static str,
     /// Native streaming cadence in ms for Confucius4-R2T2 (default 320 ms, [80, 2000]).
     pub r2t2_cadence_ms: u32,
+    /// Preferred streaming latency / lookahead in ms (None = model default).
+    pub streaming_latency_ms: Option<u32>,
 }
 
 impl Engine {
@@ -65,7 +70,7 @@ impl Engine {
         language: Option<String>,
         translate: bool,
         threads: i32,
-        r2t2_cadence_ms: u32,
+        streaming_latency_ms: Option<u32>,
     ) -> Result<Engine, String> {
         if !model_path.is_file() {
             return Err(format!("model file not found: {}", model_path.display()));
@@ -114,11 +119,13 @@ impl Engine {
             None
         };
 
+        let r2t2_cadence_ms = streaming_latency_ms.unwrap_or(320);
         log::info!(
-            "engine: {} threads, task {:?}, single-pass decode: {}, r2t2 cadence: {} ms",
+            "engine: {} threads, task {:?}, single-pass decode: {}, streaming latency: {:?} ms (r2t2: {} ms)",
             threads,
             task,
             run_ext.is_some(),
+            streaming_latency_ms,
             r2t2_cadence_ms
         );
         let session_options = transcribe_cpp::SessionOptions {
@@ -150,6 +157,7 @@ impl Engine {
             run_ext,
             ready_status,
             r2t2_cadence_ms,
+            streaming_latency_ms,
         })
     }
 
@@ -180,9 +188,28 @@ impl Engine {
         ) {
             // Nemotron 3.5 & Parakeet Cache-Aware: att_context_right: None passes -1,
             // which instructs the engine to use the model's native default trained context.
+            // Right context choices for Nemotron (80ms frame hop):
+            // 80ms -> 0 frames lookahead
+            // 160ms -> 1 frame lookahead
+            // 320ms -> 3 frames lookahead
+            // 560/640ms -> 6 frames lookahead
+            // 1120/1280ms -> 13 frames lookahead
+            let att_context_right = self.streaming_latency_ms.map(|ms| {
+                if ms <= 120 {
+                    0
+                } else if ms <= 240 {
+                    1
+                } else if ms <= 480 {
+                    3
+                } else if ms <= 800 {
+                    6
+                } else {
+                    13
+                }
+            });
             Some(transcribe_cpp::StreamExtension::ParakeetStream(
                 transcribe_cpp::ParakeetStreamOptions {
-                    att_context_right: None,
+                    att_context_right,
                 },
             ))
         } else if self.model.accepts_ext(
@@ -190,7 +217,10 @@ impl Engine {
             transcribe_cpp::sys::TRANSCRIBE_EXT_KIND_PARAKEET_BUFFERED_STREAM,
         ) {
             Some(transcribe_cpp::StreamExtension::ParakeetBuffered(
-                transcribe_cpp::ParakeetBufferedStreamOptions::default(),
+                transcribe_cpp::ParakeetBufferedStreamOptions {
+                    chunk_ms: self.streaming_latency_ms.map(|ms| ms as i32),
+                    ..Default::default()
+                },
             ))
         } else if self.model.accepts_ext(
             transcribe_cpp::ExtSlot::Stream,
@@ -560,15 +590,15 @@ fn do_load(env: &mut JNIEnv, context: &JObject) -> Result<(), String> {
         .and_then(|s| s.parse::<i32>().ok())
         .filter(|&n| n > 0)
         .unwrap_or_else(performance_core_count);
-    let r2t2_cadence_ms = read_config(&files_dir.join(MODEL_R2T2_CADENCE_FILE))
+    let streaming_latency_ms = read_config(&files_dir.join(MODEL_STREAMING_LATENCY_FILE))
+        .or_else(|| read_config(&files_dir.join(MODEL_R2T2_CADENCE_FILE)))
         .and_then(|s| s.parse::<u32>().ok())
-        .map(|ms| ms.clamp(80, 2000))
-        .unwrap_or(320);
+        .map(|ms| ms.clamp(80, 2000));
 
     if let Some(name) = read_config(&files_dir.join(ACTIVE_MODEL_FILE)) {
         let path = files_dir.join("models").join(&name);
         notify_status(env, context, &format!("Loading model {}...", name));
-        match Engine::load(&path, language.clone(), translate, threads, r2t2_cadence_ms) {
+        match Engine::load(&path, language.clone(), translate, threads, streaming_latency_ms) {
             Ok(engine) => {
                 let status = engine.ready_status;
                 *GLOBAL_ENGINE.lock().unwrap() = Some(Arc::new(Mutex::new(engine)));
@@ -597,7 +627,7 @@ fn do_load(env: &mut JNIEnv, context: &JObject) -> Result<(), String> {
 
     notify_status(env, context, "Loading model...");
 
-    match Engine::load(&path, language, translate, threads, r2t2_cadence_ms) {
+    match Engine::load(&path, language, translate, threads, streaming_latency_ms) {
         Ok(engine) => {
             let status = engine.ready_status;
             *GLOBAL_ENGINE.lock().unwrap() = Some(Arc::new(Mutex::new(engine)));

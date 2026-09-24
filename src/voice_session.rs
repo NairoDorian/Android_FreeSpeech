@@ -352,13 +352,14 @@ fn run_inference_consumer(
             lang.clone()
         };
 
+        let mut cur_stream_opts = stream_opts;
         let stream_res = loop {
             let run_opts = transcribe_cpp::RunOptions {
                 language: cur_lang.clone(),
                 task,
                 ..Default::default()
             };
-            match session.stream(&run_opts, &stream_opts) {
+            match session.stream(&run_opts, &cur_stream_opts) {
                 Ok(s) => break Ok(s),
                 Err(transcribe_cpp::Error::Unsupported(msg)) if cur_lang.is_some() => {
                     let old_lang = cur_lang.take().unwrap();
@@ -371,6 +372,17 @@ fn run_inference_consumer(
                     );
                 }
                 Err(e) => {
+                    if let Some(transcribe_cpp::StreamExtension::ParakeetStream(ref mut p)) = cur_stream_opts.family {
+                        if p.att_context_right.is_some() {
+                            log::warn!(
+                                "Parakeet stream att_context_right {:?} rejected ({}); retrying with model default context",
+                                p.att_context_right,
+                                e
+                            );
+                            p.att_context_right = None;
+                            continue;
+                        }
+                    }
                     log::error!("Failed to begin stream: {}", e);
                     break Err(e);
                 }

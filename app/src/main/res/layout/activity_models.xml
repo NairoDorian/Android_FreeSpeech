@@ -215,7 +215,7 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- Advanced: R2T2 streaming cadence -->
+            <!-- Advanced: Streaming latency & cadence -->
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -230,20 +230,20 @@
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="@string/models_r2t2_cadence_section"
+                        android:text="@string/models_streaming_latency_section"
                         android:textAppearance="?attr/textAppearanceTitleLarge"
                         android:layout_marginBottom="8dp"/>
 
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="@string/models_r2t2_cadence_desc"
+                        android:text="@string/models_streaming_latency_desc"
                         android:textAppearance="?attr/textAppearanceBodyMedium"
                         android:textColor="?attr/colorOnSurfaceVariant"
                         android:layout_marginBottom="8dp"/>
 
                     <Spinner
-                        android:id="@+id/spinner_r2t2_cadence"
+                        android:id="@+id/spinner_streaming_latency"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:minHeight="48dp"/>

@@ -130,7 +130,7 @@ public class ModelsActivity extends AppCompatActivity {
 
         setupLanguageSpinner();
         setupThreadsSpinner();
-        setupR2T2CadenceSpinner();
+        setupStreamingLatencySpinner();
 
         com.google.android.material.materialswitch.MaterialSwitch translateSwitch =
                 findViewById(R.id.switch_translate);
@@ -242,16 +242,28 @@ public class ModelsActivity extends AppCompatActivity {
         });
     }
 
-    // --- R2T2 Streaming Cadence ---------------------------------------------
+    // --- Streaming Latency & Cadence -----------------------------------------
 
     /**
-     * R2T2 native streaming chunk cadence in ms, stored in {@code model_r2t2_cadence}.
-     * Empty = default (320 ms). Values cover: 80 (Ultra), 160 (Fast), 320 (Balanced), 640 (Accurate), 1280 (High Latency).
+     * Native streaming chunk latency & lookahead in ms, stored in {@code model_streaming_latency}
+     * (and mirrored to {@code model_r2t2_cadence} for backward compatibility).
+     * Empty = default (model recommended).
+     * Presets cover both Nemotron 3.5 right-context choices and R2T2 millisecond cadences:
+     * - Default (Recommended)
+     * - 80 ms (Ultra Low Latency)
+     * - 160 ms (Low Latency)
+     * - 320 ms (Balanced)
+     * - 560 / 640 ms (High Accuracy)
+     * - 1120 / 1280 ms (Maximum Accuracy)
      */
-    private void setupR2T2CadenceSpinner() {
-        Spinner spinner = findViewById(R.id.spinner_r2t2_cadence);
+    private void setupStreamingLatencySpinner() {
+        Spinner spinner = findViewById(R.id.spinner_streaming_latency);
         if (spinner == null) return;
-        String stored = readConfig("model_r2t2_cadence");
+
+        String stored = readConfig("model_streaming_latency");
+        if (stored.isEmpty()) {
+            stored = readConfig("model_r2t2_cadence");
+        }
 
         List<String> values = new ArrayList<>(
                 Arrays.asList("", "80", "160", "320", "640", "1280"));
@@ -262,17 +274,17 @@ public class ModelsActivity extends AppCompatActivity {
         List<String> labels = new ArrayList<>(values.size());
         for (String v : values) {
             if (v.isEmpty()) {
-                labels.add("320 ms (Default / Balanced)");
+                labels.add(getString(R.string.models_streaming_latency_default));
             } else if ("80".equals(v)) {
                 labels.add("80 ms (Ultra Low Latency)");
             } else if ("160".equals(v)) {
-                labels.add("160 ms (Fast)");
+                labels.add("160 ms (Low Latency)");
             } else if ("320".equals(v)) {
                 labels.add("320 ms (Balanced)");
             } else if ("640".equals(v)) {
-                labels.add("640 ms (Accurate)");
+                labels.add("560 / 640 ms (High Accuracy)");
             } else if ("1280".equals(v)) {
-                labels.add("1280 ms (High Latency)");
+                labels.add("1120 / 1280 ms (Maximum Accuracy)");
             } else {
                 labels.add(v + " ms");
             }
@@ -287,9 +299,15 @@ public class ModelsActivity extends AppCompatActivity {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
                 String value = values.get(position);
-                if (value.equals(readConfig("model_r2t2_cadence"))) return;
+                String current = readConfig("model_streaming_latency");
+                if (current.isEmpty()) {
+                    current = readConfig("model_r2t2_cadence");
+                }
+                if (value.equals(current)) return;
+
+                writeConfig("model_streaming_latency", value);
                 writeConfig("model_r2t2_cadence", value);
-                snackbar(getString(R.string.models_r2t2_cadence_saved));
+                snackbar(getString(R.string.models_streaming_latency_saved));
                 statusText.setText(getString(R.string.models_loading));
                 reloadModelNative(ModelsActivity.this);
             }

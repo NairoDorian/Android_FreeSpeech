@@ -84,9 +84,13 @@
     <string name="models_threads_section">CPU threads</string>
     <string name="models_threads_desc">Threads used for transcription. “Automatic” picks a value based on this device\'s CPU. If transcription is slow, try different values; more threads is not always faster.</string>
     <string name="models_threads_auto">Automatic</string>
-    <string name="models_r2t2_cadence_section">R2T2 streaming cadence</string>
-    <string name="models_r2t2_cadence_desc">Cadence in milliseconds for Confucius4-R2T2 native streaming. Lower values give faster real-time updates; higher values increase batch efficiency (default 320 ms).</string>
-    <string name="models_r2t2_cadence_saved">Cadence saved</string>
+    <string name="models_streaming_latency_section">Streaming latency &amp; cadence</string>
+    <string name="models_streaming_latency_desc">Chunk latency and lookahead for real-time streaming models (Nemotron 3.5, R2T2, Parakeet). Lower values give faster on-screen updates; higher values increase accuracy (default: Recommended).</string>
+    <string name="models_streaming_latency_saved">Streaming latency saved</string>
+    <string name="models_streaming_latency_default">Default (Recommended)</string>
+    <string name="models_r2t2_cadence_section">Streaming latency &amp; cadence</string>
+    <string name="models_r2t2_cadence_desc">Chunk latency and lookahead for real-time streaming models (Nemotron 3.5, R2T2, Parakeet). Lower values give faster on-screen updates; higher values increase accuracy (default: Recommended).</string>
+    <string name="models_r2t2_cadence_saved">Streaming latency saved</string>
 
     <string name="section_benchmark">Benchmark</string>
     <string name="desc_benchmark">Measures how fast the active model transcribes on this device, using a built-in English test recording (11 s).</string>
