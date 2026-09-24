@@ -1,0 +1,46 @@
+# Gradle
+.gradle/
+build/
+app/build/
+
+# IDE
+/.idea/
+*.iml
+.vscode/
+.project
+.classpath
+.settings/
+
+# Editor swap files
+*.kate-swp
+*~
+*.swp
+
+# Android
+local.properties
+
+# Keystore (sensitive)
+release.keystore
+
+# Rust build output
+/target/
+
+# Native libs (built by cargo-ndk at build time)
+app/src/main/jniLibs/
+
+# Model files (downloaded at build time)
+*.gguf
+
+# Build outputs
+*.apk
+*.aab
+*.apks
+*.idsig
+
+# macOS
+.DS_Store
+._*
+
+# Local reference forks and repos
+/other_forks/
+/reference_repos/

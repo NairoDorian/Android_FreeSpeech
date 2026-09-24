@@ -1,0 +1,3 @@
+- Expose Offline Voice Input to external keyboards (e.g. SwiftKey)
+- Add animation for voice input (RecognizeActivity)
+- Improve build process (moved to Gradle)
