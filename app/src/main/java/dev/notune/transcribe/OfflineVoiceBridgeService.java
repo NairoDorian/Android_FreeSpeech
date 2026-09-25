@@ -76,16 +76,8 @@ public final class OfflineVoiceBridgeService extends Service {
         }
         @Override public PendingIntent requestForegroundStart(String capability) {
             requireAuthorized(capability);
-            byte[] bytes = new byte[32];
-            secureRandom.nextBytes(bytes);
-            String nonce = Base64.encodeToString(bytes, Base64.URL_SAFE | Base64.NO_PADDING | Base64.NO_WRAP);
-            synchronized (foregroundNonces) {
-                foregroundNonces.put(nonce, System.currentTimeMillis() + FOREGROUND_TOKEN_TTL_MS);
-            }
-            Intent intent = new Intent(OfflineVoiceBridgeService.this, ForegroundActivationActivity.class)
-                    .putExtra(EXTRA_FOREGROUND_NONCE, nonce);
-            return PendingIntent.getActivity(OfflineVoiceBridgeService.this, nonce.hashCode(), intent,
-                    PendingIntent.FLAG_ONE_SHOT | PendingIntent.FLAG_IMMUTABLE);
+            foregroundReady = startBridgeForeground();
+            return null;
         }
         @Override public boolean isForegroundReady(String capability) {
             requireAuthorized(capability);

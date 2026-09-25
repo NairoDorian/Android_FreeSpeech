@@ -36,6 +36,8 @@
             android:theme="@style/AppTheme.ForegroundActivation"
             android:noHistory="true"
             android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:launchMode="singleInstance"
             android:exported="false" />
 
         <!-- Main Activity -->
