@@ -230,13 +230,28 @@ public final class OfflineVoiceBridgeService extends Service {
         });
     }
 
-    public void onPartialText(String text) {
+    public void onPartialText(String committed, String tentative) {
         handler.post(() -> {
             if (!active || callback == null) return;
-            try {
-                callback.onPartialResult(text);
-            } catch (RemoteException ignored) {}
+            StringBuilder sb = new StringBuilder();
+            if (committed != null && !committed.isEmpty()) sb.append(committed);
+            if (tentative != null && !tentative.isEmpty()) {
+                if (sb.length() > 0 && !sb.toString().endsWith(" ") && !tentative.startsWith(" ")) {
+                    sb.append(" ");
+                }
+                sb.append(tentative);
+            }
+            String combined = sb.toString().trim();
+            if (!combined.isEmpty()) {
+                try {
+                    callback.onPartialResult(combined);
+                } catch (RemoteException ignored) {}
+            }
         });
+    }
+
+    public void onPartialText(String text) {
+        onPartialText("", text);
     }
 
     public void onAutoStop() {
