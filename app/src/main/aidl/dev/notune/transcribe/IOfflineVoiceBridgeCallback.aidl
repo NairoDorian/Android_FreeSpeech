@@ -4,4 +4,5 @@ interface IOfflineVoiceBridgeCallback {
     void onState(int state);
     void onResult(String text);
     void onError(int code, String userMessage);
+    void onPartialResult(String text);
 }

@@ -165,8 +165,7 @@ public final class OfflineVoiceBridgeService extends Service {
         String[] packages = getPackageManager().getPackagesForUid(Binder.getCallingUid());
         if (packages == null) return null;
         for (String packageName : packages) {
-            if (BridgePairingStore.FUTO_PACKAGE.equals(packageName)
-                    || BridgePairingStore.FUTO_STABLE_PACKAGE.equals(packageName)) {
+            if (packageName != null && packageName.startsWith("org.futo.inputmethod.latin")) {
                 return packageName;
             }
         }
@@ -208,9 +207,7 @@ public final class OfflineVoiceBridgeService extends Service {
         }
         active = true;
         if (!foregroundReady) {
-            deliverError(ERROR_UNAVAILABLE, getString(R.string.bridge_error_foreground_start));
-            cleanup();
-            return;
+            foregroundReady = startBridgeForeground();
         }
         notifyState(STATE_STARTING);
         if (!nativeInitialized) {
@@ -238,6 +235,22 @@ public final class OfflineVoiceBridgeService extends Service {
                 deliverError(ERROR_CAPTURE, getString(R.string.bridge_error_capture));
                 cleanup();
             }
+        });
+    }
+
+    public void onPartialText(String text) {
+        handler.post(() -> {
+            if (!active || callback == null) return;
+            try {
+                callback.onPartialResult(text);
+            } catch (RemoteException ignored) {}
+        });
+    }
+
+    public void onAutoStop() {
+        handler.post(() -> {
+            if (!active) return;
+            stopSession();
         });
     }
 
