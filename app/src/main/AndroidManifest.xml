@@ -15,6 +15,12 @@
         <intent>
             <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
         </intent>
+        <!-- Explicit result-bearing pairing endpoint supplied by the FUTO follow-up. -->
+        <package android:name="org.futo.inputmethod.latin.unstable" />
+        <package android:name="org.futo.inputmethod.latin" />
+        <intent>
+            <action android:name="org.futo.inputmethod.latin.action.PAIR_OFFLINE_VOICE_BRIDGE" />
+        </intent>
     </queries>
 
     <application
@@ -23,6 +29,14 @@
         android:icon="@drawable/icon"
         android:theme="@style/AppTheme"
         android:hasCode="true">
+
+        <!-- Internal one-shot handoff for microphone foreground-service promotion. -->
+        <activity
+            android:name=".ForegroundActivationActivity"
+            android:theme="@style/AppTheme.ForegroundActivation"
+            android:noHistory="true"
+            android:excludeFromRecents="true"
+            android:exported="false" />
 
         <!-- Main Activity -->
         <activity
@@ -113,6 +127,12 @@
                 android:name="android.speech"
                 android:resource="@xml/recognition_service" />
         </service>
+
+        <!-- On-demand authenticated Binder bridge for the paired FUTO IME only. -->
+        <service
+            android:name=".OfflineVoiceBridgeService"
+            android:foregroundServiceType="microphone"
+            android:exported="true" />
 
         <!-- IME Service -->
         <service

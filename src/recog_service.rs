@@ -17,6 +17,7 @@ use jni::objects::{GlobalRef, JClass, JObject};
 use jni::JNIEnv;
 use once_cell::sync::Lazy;
 
+use crate::audio;
 use crate::engine;
 use crate::voice_session::SendStream;
 
@@ -207,7 +208,8 @@ pub unsafe extern "system" fn Java_dev_notune_transcribe_VoiceRecognitionService
         call_void(&mut env2, shared.target.as_obj(), "onReadyForSpeech");
     }
 
-    // Open the microphone (16 kHz mono, matching the model + voice_session).
+    // Open a device-supported microphone format; the callback converts it to
+    // the model's mono 16 kHz input.
     let host = cpal::default_host();
     let device = match host.default_input_device() {
         Some(d) => d,
@@ -217,29 +219,82 @@ pub unsafe extern "system" fn Java_dev_notune_transcribe_VoiceRecognitionService
             return;
         }
     };
-    let config = cpal::StreamConfig {
-        channels: 1,
-        sample_rate: cpal::SampleRate(16000),
-        buffer_size: cpal::BufferSize::Default,
+    let input_format = match audio::select_input_format(&device) {
+        Ok(format) => format,
+        Err(_) => {
+            log::error!("recognition recorder config selection failed");
+            let mut env2 = jvm.attach_current_thread().unwrap();
+            call_error(&mut env2, shared.target.as_obj(), ERROR_AUDIO);
+            return;
+        }
     };
-
-    let cb_shared = shared.clone();
-    let stream = device.build_input_stream(
-        &config,
-        move |data: &[f32], _: &_| audio_callback(&cb_shared, data),
-        |e| log::error!("RecognitionService stream error: {}", e),
-        None,
-    );
+    let converter = Arc::new(Mutex::new(audio::CaptureConverter::new(
+        input_format.config.channels,
+        input_format.config.sample_rate.0,
+    )));
+    let error_shared = shared.clone();
+    let make_error = || {
+        let failure_shared = error_shared.clone();
+        move |_| recorder_failed(&failure_shared)
+    };
+    let stream = match input_format.sample_format {
+        cpal::SampleFormat::F32 => {
+            let cb_shared = shared.clone();
+            let converter = converter.clone();
+            device.build_input_stream(
+                &input_format.config,
+                move |data: &[f32], _| {
+                    audio_callback(&cb_shared, &converter.lock().unwrap().convert(data))
+                },
+                make_error(),
+                None,
+            )
+        }
+        cpal::SampleFormat::I16 => {
+            let cb_shared = shared.clone();
+            let converter = converter.clone();
+            device.build_input_stream(
+                &input_format.config,
+                move |data: &[i16], _| {
+                    audio_callback(
+                        &cb_shared,
+                        &converter.lock().unwrap().convert(&audio::i16_to_f32(data)),
+                    )
+                },
+                make_error(),
+                None,
+            )
+        }
+        cpal::SampleFormat::U16 => {
+            let cb_shared = shared.clone();
+            let converter = converter.clone();
+            device.build_input_stream(
+                &input_format.config,
+                move |data: &[u16], _| {
+                    audio_callback(
+                        &cb_shared,
+                        &converter.lock().unwrap().convert(&audio::u16_to_f32(data)),
+                    )
+                },
+                make_error(),
+                None,
+            )
+        }
+        _ => unreachable!(),
+    };
 
     match stream {
         Ok(s) => {
-            s.play().ok();
+            if s.play().is_err() {
+                log::error!("recognition recorder play failed");
+                recorder_failed(&shared);
+                return;
+            }
             *stream_holder.lock().unwrap() = Some(SendStream(s));
         }
-        Err(e) => {
-            log::error!("Failed to open microphone: {}", e);
-            let mut env2 = jvm.attach_current_thread().unwrap();
-            call_error(&mut env2, shared.target.as_obj(), ERROR_AUDIO);
+        Err(_) => {
+            log::error!("recognition recorder open failed");
+            recorder_failed(&shared);
             return;
         }
     }
@@ -667,4 +722,15 @@ fn clear_session(shared: &Arc<Endpoint>) {
             *guard = None;
         }
     }
+}
+
+fn recorder_failed(shared: &Arc<Endpoint>) {
+    if shared.finalized.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    shared.cancelled.store(true, Ordering::SeqCst);
+    if let Ok(mut env) = shared.jvm.attach_current_thread() {
+        call_error(&mut env, shared.target.as_obj(), ERROR_AUDIO);
+    }
+    clear_session(shared);
 }

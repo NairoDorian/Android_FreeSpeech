@@ -389,6 +389,31 @@ pub fn reset() {
     *state = LoadState::Idle;
 }
 
+/// Drops the shared engine to free model memory, but only when it is safe:
+/// no component may currently hold a reference. Every transcription runs on
+/// its own Arc clone obtained from get_engine, so a strong count of 1 means
+/// the global slot is the sole owner and dropping it actually releases the model.
+pub fn unload_if_idle() -> bool {
+    let (lock, cvar) = &*LOAD_STATE;
+    let mut state = lock.lock().unwrap();
+    while *state == LoadState::Loading {
+        state = cvar.wait(state).unwrap();
+    }
+    let mut engine = GLOBAL_ENGINE.lock().unwrap();
+    match engine.as_ref() {
+        None => true,
+        Some(arc) => {
+            if Arc::strong_count(arc) > 1 {
+                return false;
+            }
+            *engine = None;
+            *state = LoadState::Idle;
+            cvar.notify_all();
+            true
+        }
+    }
+}
+
 fn notify_status(env: &mut JNIEnv, obj: &JObject, msg: &str) {
     if let Ok(jmsg) = env.new_string(msg) {
         let _ = env.call_method(

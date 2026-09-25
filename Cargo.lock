@@ -62,6 +62,7 @@ dependencies = [
  "jni",
  "libc",
  "log",
+ "ndk-context",
  "once_cell",
  "transcribe-cpp",
 ]

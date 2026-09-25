@@ -43,6 +43,10 @@ android {
         }
     }
 
+    buildFeatures {
+        aidl = true
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
@@ -65,6 +69,12 @@ android {
     // Play Asset Delivery: large model files go into a separate asset pack
     // so the base module stays under the 200 MB Play Store limit.
     assetPacks += listOf(":model_assets")
+
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+        }
+    }
 }
 
 // For APK builds (assemble/install), asset packs are ignored by AGP so we
@@ -96,6 +106,10 @@ dependencies {
         implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22")
         implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22")
     }
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.12.2")
+    testImplementation("androidx.test:core:1.5.0")
 }
 
 // ---------------------------------------------------------------------------

@@ -92,6 +92,25 @@
     <string name="models_r2t2_cadence_desc">Chunk latency and lookahead for real-time streaming models (Nemotron 3.5, R2T2, Parakeet). Lower values give faster on-screen updates; higher values increase accuracy (default: Recommended).</string>
     <string name="models_r2t2_cadence_saved">Streaming latency saved</string>
 
+    <string name="bridge_section">FUTO offline voice bridge</string>
+    <string name="bridge_not_paired">Not paired. Pairing requires FUTO Keyboard’s approved pairing screen.</string>
+    <string name="bridge_paired">Paired with FUTO Keyboard. You can revoke access here.</string>
+    <string name="bridge_pair">Pair with FUTO Keyboard</string>
+    <string name="bridge_revoke">Revoke FUTO pairing</string>
+    <string name="bridge_pairing_title">Pair FUTO Keyboard?</string>
+    <string name="bridge_pairing_consent">FUTO Keyboard will be allowed to request offline voice transcription from this device. Continue to FUTO Keyboard to approve pairing.</string>
+    <string name="bridge_pairing_continue">Continue</string>
+    <string name="bridge_pairing_unavailable">FUTO Keyboard’s pairing screen is unavailable. Update FUTO Keyboard to a version that supports offline voice pairing.</string>
+    <string name="bridge_channel_name">Offline voice input</string>
+    <string name="bridge_notification_title">Offline voice input is active</string>
+    <string name="bridge_notification_text">FUTO Keyboard is recording or processing speech</string>
+    <string name="bridge_error_busy">Offline voice input is already active.</string>
+    <string name="bridge_error_mic_permission">Microphone permission is required in Offline Voice Input.</string>
+    <string name="bridge_error_capture">Offline voice input could not capture speech.</string>
+    <string name="bridge_error_no_match">No speech was recognized.</string>
+    <string name="bridge_error_timeout">Offline voice input timed out.</string>
+    <string name="bridge_error_foreground_start">Offline Voice Input could not start microphone recording while it is in the background.</string>
+
     <string name="section_benchmark">Benchmark</string>
     <string name="desc_benchmark">Measures how fast the active model transcribes on this device, using a built-in English test recording (11 s).</string>
     <string name="btn_benchmark">Run benchmark</string>

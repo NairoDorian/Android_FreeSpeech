@@ -10,9 +10,12 @@ import com.google.android.material.color.DynamicColors;
  * ":ime" keyboard process).
  */
 public class App extends Application {
+    private static final NativeContextBootstrap NATIVE_CONTEXT = new NativeContextBootstrap();
+
     @Override
     public void onCreate() {
         super.onCreate();
+        NATIVE_CONTEXT.initialize(this);
         ThemePrefs.apply(this);
         DynamicColors.applyToActivitiesIfAvailable(this);
     }

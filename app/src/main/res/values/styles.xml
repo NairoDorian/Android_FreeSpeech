@@ -13,6 +13,16 @@
         <item name="android:windowLightStatusBar">true</item>
     </style>
 
+    <!-- Invisible one-shot activity used to obtain while-in-use state before
+         promoting the bridge microphone service. -->
+    <style name="AppTheme.ForegroundActivation" parent="@android:style/Theme.Translucent.NoTitleBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowDisablePreview">true</item>
+    </style>
+
     <!-- Voice-input popup (RecognizeActivity): a translucent window so the
          calling app stays visible (and keeps its UI state) behind the compact
          bottom panel, instead of a full-screen takeover. -->

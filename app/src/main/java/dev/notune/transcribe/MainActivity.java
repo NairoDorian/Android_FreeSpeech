@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.content.res.ColorStateList;
+import android.net.Uri;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.speech.RecognitionListener;
@@ -35,6 +36,10 @@ public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
     private static final int PERM_REQ_CODE = 101;
     private static final int REQ_VOICE_TEST = 202;
+    private static final int REQ_FUTO_PAIRING = 1003;
+
+    private String pendingBridgeCapability;
+    private String pendingBridgePackage;
 
     static {
         try {
@@ -159,6 +164,15 @@ public class MainActivity extends AppCompatActivity {
 
         // Initial check
         updateVoiceInputStatus();
+        updateBridgePairingStatus();
+
+        Button bridgePairButton = findViewById(R.id.btn_bridge_pair);
+        Button bridgeRevokeButton = findViewById(R.id.btn_bridge_revoke);
+        if (bridgePairButton != null) bridgePairButton.setOnClickListener(v -> beginFutoPairing());
+        if (bridgeRevokeButton != null) bridgeRevokeButton.setOnClickListener(v -> {
+            BridgePairingStore.revoke(this);
+            updateBridgePairingStatus();
+        });
 
         // Start init
         initNative(this);
@@ -169,6 +183,44 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
         // Re-check on return from the keyboard chooser, settings, or a test run.
         updateVoiceInputStatus();
+        updateBridgePairingStatus();
+    }
+
+    private void updateBridgePairingStatus() {
+        TextView status = findViewById(R.id.text_bridge_status);
+        Button pair = findViewById(R.id.btn_bridge_pair);
+        Button revoke = findViewById(R.id.btn_bridge_revoke);
+        if (status == null || pair == null || revoke == null) return;
+        boolean paired = BridgePairingStore.isPaired(this);
+        status.setText(paired ? R.string.bridge_paired : R.string.bridge_not_paired);
+        pair.setVisibility(paired ? View.GONE : View.VISIBLE);
+        revoke.setVisibility(paired ? View.VISIBLE : View.GONE);
+    }
+
+    private void beginFutoPairing() {
+        String targetPackage = BridgePairingStore.resolveInstalledFutoPackage(this);
+        Intent pairing = new Intent(BridgePairingStore.FUTO_PAIR_ACTION)
+                .setComponent(new ComponentName(
+                        targetPackage,
+                        "org.futo.inputmethod.latin.uix.actions.OfflineVoiceBridgePairingActivity"));
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.bridge_pairing_title)
+                .setMessage(R.string.bridge_pairing_consent)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.bridge_pairing_continue, (d, w) -> {
+                    pendingBridgeCapability = BridgePairingStore.createCapability();
+                    pendingBridgePackage = targetPackage;
+                    pairing.putExtra(BridgePairingStore.EXTRA_CAPABILITY, pendingBridgeCapability);
+                    pairing.putExtra(Intent.EXTRA_REFERRER,
+                            Uri.parse("android-app://" + getPackageName()));
+                    try {
+                        startActivityForResult(pairing, REQ_FUTO_PAIRING);
+                    } catch (android.content.ActivityNotFoundException e) {
+                        pendingBridgeCapability = null;
+                        pendingBridgePackage = null;
+                        snackbar(getString(R.string.bridge_pairing_unavailable));
+                    }
+                }).show();
     }
 
     /**
@@ -247,6 +299,20 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_FUTO_PAIRING) {
+            if (resultCode == RESULT_OK && data != null
+                    && data.getBooleanExtra(BridgePairingStore.EXTRA_ACCEPTED, false)
+                    && pendingBridgeCapability != null) {
+                String pkgToSave = pendingBridgePackage != null
+                        ? pendingBridgePackage
+                        : BridgePairingStore.FUTO_PACKAGE;
+                BridgePairingStore.save(this, pkgToSave, pendingBridgeCapability);
+            }
+            pendingBridgeCapability = null;
+            pendingBridgePackage = null;
+            updateBridgePairingStatus();
+            return;
+        }
         if (requestCode == REQ_VOICE_TEST && resultCode == RESULT_OK && data != null) {
             ArrayList<String> results =
                     data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
